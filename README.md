@@ -51,3 +51,5 @@ npm run deploy
 - WebSocket: `/api/agent/:type`, `/voice`
 - MCP: `/mcp`
 - 35+ REST API endpoints under `/api/`
+
+<!-- deployment trigger: 2026-09-05 -->
