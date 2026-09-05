@@ -10,11 +10,11 @@
     "tail": "wrangler tail"
   },
   "dependencies": {
-    "agents": "^0.1.0",
-    "ai": "^4.0.0",
-    "workers-ai-provider": "^3.0.0",
+    "agents": "^0.22.0",
+    "ai": "^5.0.0",
+    "workers-ai-provider": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@cloudflare/sandbox": "^1.0.0",
+    "@cloudflare/sandbox": "^0.1.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
