@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "nemotron-nexus",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./public", "binding": "ASSETS", "not_found_handling": "single-page-application" },
+  "ai": { "binding": "AI" },
+  "browser": { "binding": "BROWSER", "remote": true },
+  "vectorize": [{ "binding": "VECTORIZE", "index_name": "nemotron-nexus-index" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "nemotron-nexus-db", "database_id": "REPLACE_WITH_D1_ID" }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "nemotron-nexus-bucket" }],
+  "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_WITH_KV_ID" }, { "binding": "SESSIONS", "id": "REPLACE_WITH_KV_SESSIONS_ID" }],
+  "ai_search_namespaces": [{ "binding": "AI_SEARCH", "namespace": "default", "remote": true }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "NEXUS_AGENT", "class_name": "NexusAgent" },
+      { "name": "BUILDER_AGENT", "class_name": "BuilderAgent" },
+      { "name": "RESEARCHER_AGENT", "class_name": "ResearcherAgent" },
+      { "name": "CREATIVE_AGENT", "class_name": "CreativeAgent" },
+      { "name": "ANALYST_AGENT", "class_name": "AnalystAgent" },
+      { "name": "NEXUS_MCP", "class_name": "NexusMCP" },
+      { "name": "VOICE_AGENT", "class_name": "NexusVoiceAgent" },
+      { "name": "SANDBOX", "class_name": "Sandbox" }
+    ]
+  },
+  "workflows": [{ "name": "rag-pipeline", "binding": "RAG_WORKFLOW", "class_name": "RAGWorkflow" }],
+  "queues": { "producers": [{ "binding": "DOC_QUEUE", "queue": "nemotron-nexus-docs" }], "consumers": [{ "queue": "nemotron-nexus-docs", "max_batch_size": 10, "max_concurrency": 5 }] },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["NexusAgent", "BuilderAgent", "ResearcherAgent", "CreativeAgent", "AnalystAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["NexusMCP", "NexusVoiceAgent"] },
+    { "tag": "v3", "new_sqlite_classes": ["Sandbox"] }
+  ],
+  "observability": { "enabled": true }
+}
