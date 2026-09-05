@@ -30,5 +30,10 @@
     { "tag": "v2", "new_sqlite_classes": ["NexusMCP", "NexusVoiceAgent"] },
     { "tag": "v3", "new_sqlite_classes": ["Sandbox"] }
   ],
-  "observability": { "enabled": true }
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true
+    }
+  }
 }
