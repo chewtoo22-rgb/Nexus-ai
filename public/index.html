@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus AI</title>
+  <style>
+    :root { color-scheme: dark; --bg: #0b0f19; --card: #121826; --text: #e5e7eb; --muted: #9ca3af; --accent: #6366f1; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: radial-gradient(1200px 600px at 20% -10%, #1e1b4b 0%, transparent 50%), var(--bg); color: var(--text); min-height: 100vh; display: grid; place-items: center; padding: 2rem; }
+    .card { width: min(640px, 100%); background: color-mix(in srgb, var(--card) 90%, transparent); border: 1px solid #1f2937; border-radius: 16px; padding: 2rem; box-shadow: 0 20px 50px rgba(0,0,0,.35); backdrop-filter: blur(8px); }
+    h1 { font-size: 1.75rem; letter-spacing: -0.02em; margin-bottom: .5rem; }
+    p { color: var(--muted); line-height: 1.6; margin-bottom: 1.25rem; }
+    .row { display: flex; flex-wrap: wrap; gap: .75rem; }
+    a, button { appearance: none; border: 0; border-radius: 10px; padding: .7rem 1rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: .4rem; }
+    .primary { background: var(--accent); color: white; }
+    .ghost { background: #1f2937; color: var(--text); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em; background: #0f172a; padding: .15rem .4rem; border-radius: 6px; }
+    .status { margin-top: 1.25rem; font-size: .9rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Nexus AI</h1>
+    <p>Full AI platform on Cloudflare Workers — agents, MCP, streaming, sandbox, connectors, voice, RAG, and more.</p>
+    <div class="row">
+      <a class="primary" href="/api/health">Health check</a>
+      <a class="ghost" href="/api/models">Models</a>
+      <a class="ghost" href="/mcp">MCP endpoint</a>
+    </div>
+    <p class="status">API base: <code>/api/</code> · WebSocket agents: <code>/api/agent/:type</code></p>
+  </main>
+  <script>
+    fetch('/api/health').then(r => r.json()).then(d => {
+      document.querySelector('.status').textContent = `${d.name} v${d.version} · ${d.status} · ${d.agents?.length || 0} agents`;
+    }).catch(() => {});
+  </script>
+</body>
+</html>

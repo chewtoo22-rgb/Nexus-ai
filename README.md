@@ -1,6 +1,6 @@
-# nemotron-nexus v3
+# Nexus AI (nexus-ai)
 
-![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/chewtoo22-rgb/Xodus-ai?utm_source=oss&utm_medium=github&utm_campaign=chewtoo22-rgb%2FXodus-ai&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/chewtoo22-rgb/Nexus-ai?utm_source=oss&utm_medium=github&utm_campaign=chewtoo22-rgb%2FNexus-ai&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
 Full AI platform on Cloudflare Workers. 5 agents, 20+ AI models, MCP server, streaming, sandbox code execution, 13 connectors, 7 plug-ins, voice mode, auth, rate limiting, projects.
 
@@ -54,4 +54,4 @@ npm run deploy
 - MCP: `/mcp`
 - 35+ REST API endpoints under `/api/`
 
-<!-- deployment trigger: 2026-09-05 -->
+<!-- deployment trigger -->
