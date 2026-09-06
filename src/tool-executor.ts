@@ -1,4 +1,5 @@
 import { MODELS } from "./models";
+import * as parse5 from "parse5";
 
 export interface ToolCallResult {
   result: string;
@@ -51,15 +52,22 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
 }
 
 function stripDangerousBlocks(input: string): string {
-  let previous: string;
-  let current = input;
-  do {
-    previous = current;
-    current = current
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[\s\S]*?<\/style>/gi, "");
-  } while (current !== previous);
-  return current;
+  const document = parse5.parse(input) as any;
+  const blocked = new Set(["script", "style", "noscript"]);
+
+  const walk = (node: any): void => {
+    if (!node || !Array.isArray(node.childNodes)) return;
+
+    node.childNodes = node.childNodes.filter((child: any) => {
+      const tagName = typeof child?.tagName === "string" ? child.tagName.toLowerCase() : "";
+      return !blocked.has(tagName);
+    });
+
+    for (const child of node.childNodes) walk(child);
+  };
+
+  walk(document);
+  return parse5.serialize(document);
 }
 
 async function browserFetchMarkdown(env: any, url: string): Promise<ToolCallResult> {
