@@ -23,26 +23,46 @@ function isPrivateIPv4(host: string): boolean {
   return false;
 }
 
+function mappedIPv4(host: string): string | null {
+  const match = host.match(/^(?:::|0:0:0:0:0:)ffff:(.+)$/i);
+  if (!match) return null;
+  if (match[1].includes(".")) return match[1];
+  const parts = match[1].split(":");
+  if (parts.length !== 2 || parts.some((part) => !/^[0-9a-f]{1,4}$/i.test(part))) return null;
+  const high = parseInt(parts[0], 16);
+  const low = parseInt(parts[1], 16);
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+}
+
+function clientError(message: string): Error {
+  const err = new Error(message);
+  (err as Error & { status: number }).status = 400;
+  return err;
+}
+
 export function assertPublicHttpUrl(raw: unknown): URL {
-  if (typeof raw !== "string" || !raw.trim()) throw new Error("URL required");
+  if (typeof raw !== "string" || !raw.trim()) throw clientError("URL required");
   let url: URL;
   try {
     url = new URL(raw.trim());
   } catch {
-    throw new Error("Invalid URL");
+    throw clientError("Invalid URL");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Only http(s) URLs are allowed");
+    throw clientError("Only http(s) URLs are allowed");
   }
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (BLOCKED_HOSTS.has(host) || BLOCKED_HOSTS.has(url.hostname.toLowerCase())) {
-    throw new Error("URL host is not allowed");
+    throw clientError("URL host is not allowed");
   }
   if (host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost")) {
-    throw new Error("URL host is not allowed");
+    throw clientError("URL host is not allowed");
   }
-  if (isPrivateIPv4(host) || host.startsWith("fd") || host.startsWith("fe80") || host === "::" || host === "0:0:0:0:0:0:0:1") {
-    throw new Error("Private addresses are not allowed");
+  const firstIPv6Group = host.includes(":") ? parseInt(host.split(":")[0], 16) : NaN;
+  const embeddedIPv4 = mappedIPv4(host);
+  const isUniqueLocal = Number.isFinite(firstIPv6Group) && (firstIPv6Group & 0xfe00) === 0xfc00;
+  if (isPrivateIPv4(host) || (embeddedIPv4 !== null && isPrivateIPv4(embeddedIPv4)) || isUniqueLocal || host.startsWith("fe80") || host === "::" || host === "0:0:0:0:0:0:0:1") {
+    throw clientError("Private addresses are not allowed");
   }
   return url;
 }
@@ -70,6 +90,6 @@ export async function parseJson<T = Record<string, unknown>>(request: Request): 
   try {
     return (await request.json()) as T;
   } catch {
-    throw new Error("Invalid JSON body");
+    throw clientError("Invalid JSON body");
   }
 }

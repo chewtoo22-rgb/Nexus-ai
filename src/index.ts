@@ -8,9 +8,9 @@ import { runCodeTool } from "./code-exec";
 import { streamChat, sseSend } from "./streaming";
 import { CONNECTORS, getConnectorsByCategory, getConnector } from "./connectors";
 import { getEnabledPlugins, installPlugin, togglePlugin, uninstallPlugin, BUILTIN_PLUGINS } from "./plugins";
-import { authenticateRequest, deleteSession, loginUser, registerUser } from "./auth";
+import { authenticateRequest, deleteSession, loginUser, registerUser, type Session } from "./auth";
 import { checkRateLimit, getRateLimitHeaders } from "./rate-limit";
-import { parseJson } from "./security";
+import { assertPublicHttpUrl, parseJson } from "./security";
 import { Sandbox } from "@cloudflare/sandbox";
 
 export {
@@ -41,7 +41,7 @@ export interface Env {
   ANALYST_AGENT: DurableObjectNamespace;
   NEXUS_MCP: DurableObjectNamespace;
   VOICE_AGENT: DurableObjectNamespace;
-  SANDBOX: DurableObjectNamespace;
+  SANDBOX: DurableObjectNamespace<Sandbox>;
   RAG_WORKFLOW: Workflow;
   DOC_QUEUE: Queue<any>;
   ASSETS: Fetcher;
@@ -64,11 +64,20 @@ const AGENT_PROMPTS: Record<string, string> = {
 };
 
 const AUTH_PREFIXES = [
+  "/mcp",
+  "/voice",
+  "/api/agent/",
+  "/api/chat",
+  "/api/browser",
   "/api/sandbox",
   "/api/code/",
   "/api/tools/execute",
+  "/api/conversations",
   "/api/documents",
   "/api/ingest",
+  "/api/artifacts",
+  "/api/images/",
+  "/api/projects",
   "/api/plugins",
   "/api/connectors/install",
   "/api/stats",
@@ -76,9 +85,6 @@ const AUTH_PREFIXES = [
 
 function needsAuth(path: string, method: string): boolean {
   if (AUTH_PREFIXES.some((p) => path === p || path.startsWith(p))) return true;
-  if (path === "/api/conversations" && method === "GET") return true;
-  if (path === "/api/artifacts" && method === "GET") return true;
-  if (path.startsWith("/api/projects") && method !== "GET") return true;
   if (path.startsWith("/api/connectors/") && method === "DELETE") return true;
   return false;
 }
@@ -91,9 +97,43 @@ function json(data: unknown, status = 200, extra: Record<string, string> = {}): 
 }
 
 function httpError(err: unknown): Response {
-  const message = err instanceof Error ? err.message : "Request failed";
-  const status = typeof (err as { status?: number })?.status === "number" ? (err as { status: number }).status : 400;
-  return json({ error: message }, status);
+  const explicitStatus = typeof (err as { status?: number })?.status === "number" ? (err as { status: number }).status : undefined;
+  if (explicitStatus !== undefined && explicitStatus >= 400 && explicitStatus < 500) {
+    return json({ error: err instanceof Error ? err.message : "Request failed" }, explicitStatus);
+  }
+  return json({ error: "Internal server error" }, 500);
+}
+
+function requireSession(session: Session | null): Session {
+  if (session) return session;
+  const err = new Error("Authentication required");
+  (err as Error & { status: number }).status = 401;
+  throw err;
+}
+
+async function persistChatTurn(
+  env: Env,
+  conversationId: string,
+  message: string,
+  response: string,
+  model: string,
+  agentType: string,
+  usage: { input_tokens?: number; output_tokens?: number },
+  artifacts: any[],
+): Promise<void> {
+  const statements = [
+    env.DB.prepare(
+      "INSERT INTO messages (id, conversation_id, role, content, model, agent_type) VALUES (?, ?, 'user', ?, ?, ?)",
+    ).bind(crypto.randomUUID(), conversationId, message, model, agentType),
+    env.DB.prepare(
+      "INSERT INTO messages (id, conversation_id, role, content, model, agent_type, tokens_in, tokens_out, artifacts) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)",
+    ).bind(crypto.randomUUID(), conversationId, response, model, agentType, usage.input_tokens || 0, usage.output_tokens || 0, artifacts.length ? JSON.stringify(artifacts) : null),
+    env.DB.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").bind(conversationId),
+    ...artifacts.map((artifact) => env.DB.prepare(
+      "INSERT INTO artifacts (id, conversation_id, type, title, language, content, r2_key) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).bind(crypto.randomUUID(), conversationId, artifact?.type || "code", artifact?.title || null, artifact?.language || null, artifact?.content || null, artifact?.r2_key || null)),
+  ];
+  await env.DB.batch(statements);
 }
 
 export default {
@@ -117,29 +157,33 @@ export default {
       );
     }
 
+    const session = await authenticateRequest(request, env);
+    if (needsAuth(path, request.method) && !session) {
+      return json({ error: "Authentication required" }, 401, rlH);
+    }
+
     if (path === "/mcp" || path === "/mcp/") {
-      return env.NEXUS_MCP.get(env.NEXUS_MCP.idFromName("default")).fetch(request);
+      return env.NEXUS_MCP.get(env.NEXUS_MCP.idFromName(requireSession(session).userId)).fetch(request);
     }
     if (path === "/voice" && request.headers.get("Upgrade") === "websocket") {
-      return env.VOICE_AGENT.get(env.VOICE_AGENT.idFromName("default")).fetch(request);
+      return env.VOICE_AGENT.get(env.VOICE_AGENT.idFromName(requireSession(session).userId)).fetch(request);
     }
     if (path.startsWith("/api/agent/") && request.headers.get("Upgrade") === "websocket") {
       const agentType = path.split("/")[3];
       const bindingName = AGENT_MAP[agentType as keyof typeof AGENT_MAP];
       if (!bindingName) return new Response("Unknown agent", { status: 404 });
       const agentId = url.searchParams.get("id") || "default";
-      return (env as any)[bindingName].get((env as any)[bindingName].idFromName(agentId)).fetch(request);
-    }
-
-    if (needsAuth(path, request.method)) {
-      const session = await authenticateRequest(request, env);
-      if (!session) return json({ error: "Authentication required" }, 401, rlH);
+      const user = requireSession(session);
+      const scopedAgentId = `${user.userId}:${agentId}`;
+      const headers = new Headers(request.headers);
+      headers.set("X-Nexus-User-Id", user.userId);
+      return (env as any)[bindingName].get((env as any)[bindingName].idFromName(scopedAgentId)).fetch(new Request(request, { headers }));
     }
 
     const ok = (data: unknown, status = 200) => json(data, status, rlH);
 
     try {
-      return await handleApi(request, env, path, url, ok, rlH);
+      return await handleApi(request, env, path, url, ok, rlH, session);
     } catch (err) {
       const res = httpError(err);
       const headers = new Headers(res.headers);
@@ -168,6 +212,7 @@ async function handleApi(
   url: URL,
   ok: (data: unknown, status?: number) => Response,
   rlH: Record<string, string>,
+  session: Session | null,
 ): Promise<Response> {
   if (path === "/api/health") {
     return ok({
@@ -183,28 +228,46 @@ async function handleApi(
   }
 
   if (path === "/api/chat" && request.method === "POST") {
-    const body = await parseJson<{ message?: string; agent?: string; sessionId?: string; model?: string; images?: string[]; stream?: boolean }>(request);
+    const user = requireSession(session);
+    const body = await parseJson<{ message?: string; agent?: string; conversationId?: string; sessionId?: string; model?: string; images?: string[]; stream?: boolean }>(request);
     const message = String(body.message || "").trim();
     if (!message) return ok({ error: "message required" }, 400);
     const agentType = body.agent || "nexus";
     const bindingName = AGENT_MAP[agentType as keyof typeof AGENT_MAP];
     if (!bindingName) return ok({ error: "Unknown agent" }, 400);
     const selectedModel = body.model || AGENT_MODELS[agentType as keyof typeof AGENT_MODELS].primary;
-    const sid = body.sessionId || crypto.randomUUID();
+    const requestedId = body.conversationId ?? body.sessionId;
+    if (requestedId !== undefined && (typeof requestedId !== "string" || !requestedId.trim())) return ok({ error: "Invalid conversationId" }, 400);
+    const sid = requestedId?.trim() || crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO conversations (id, agent_type, title, model, user_id) VALUES (?, ?, ?, ?, ?)",
+    ).bind(sid, agentType, message.slice(0, 80), selectedModel, user.userId).run();
+    const conversation = await env.DB.prepare("SELECT user_id FROM conversations WHERE id = ?").bind(sid).first<{ user_id: string | null }>();
+    if (!conversation || conversation.user_id !== user.userId) return ok({ error: "Conversation not found" }, 404);
+    const historyResult = await env.DB.prepare(
+      "SELECT m.role, m.content FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.conversation_id = ? AND c.user_id = ? ORDER BY m.created_at DESC LIMIT 24",
+    ).bind(sid, user.userId).all<{ role: string; content: string }>();
+    const history = [...(historyResult.results || [])].reverse().map((row) => ({ role: row.role, content: row.content }));
     if (body.stream) {
+      const artifacts: any[] = [];
       const readable = new ReadableStream({
         async start(controller) {
           await streamChat({
             model: selectedModel,
             systemPrompt: AGENT_PROMPTS[agentType] || AGENT_PROMPTS.nexus,
-            messages: [{ role: "user", content: message }],
+            messages: [...history, { role: "user", content: message }],
             agentType,
             env,
+            userId: user.userId,
             onToken: (t) => sseSend(controller, "token", { token: t }),
             onToolCall: (tool, args) => sseSend(controller, "tool_call", { tool, args }),
             onToolResult: (tool, result) => sseSend(controller, "tool_result", { tool, result }),
-            onArtifact: (a) => sseSend(controller, "artifact", a),
-            onComplete: (fullText, usage) => {
+            onArtifact: (a) => {
+              artifacts.push(a);
+              sseSend(controller, "artifact", a);
+            },
+            onComplete: async (fullText, usage) => {
+              await persistChatTurn(env, sid, message, fullText, selectedModel, agentType, usage, artifacts);
               sseSend(controller, "done", { content: fullText, model: selectedModel, usage, sessionId: sid });
               controller.close();
             },
@@ -220,7 +283,7 @@ async function handleApi(
       });
     }
     return (env as any)[bindingName]
-      .get((env as any)[bindingName].idFromName(sid))
+      .get((env as any)[bindingName].idFromName(`${user.userId}:${sid}`))
       .fetch("https://do/chat", {
         method: "POST",
         body: JSON.stringify({ content: message, conversationId: sid, images: body.images, model: body.model }),
@@ -229,57 +292,79 @@ async function handleApi(
   }
 
   if (path === "/api/conversations" && request.method === "GET") {
-    const r = await env.DB.prepare("SELECT * FROM conversations ORDER BY updated_at DESC LIMIT 100").all();
+    const user = requireSession(session);
+    const r = await env.DB.prepare("SELECT * FROM conversations WHERE user_id = ? ORDER BY updated_at DESC LIMIT 100").bind(user.userId).all();
     return ok(r.results);
   }
   if (path === "/api/conversations" && request.method === "POST") {
+    const user = requireSession(session);
     const { agentType, title, projectId } = await parseJson<any>(request);
+    if (projectId) {
+      const project = await env.DB.prepare("SELECT id FROM projects WHERE id = ? AND user_id = ?").bind(projectId, user.userId).first();
+      if (!project) return ok({ error: "Project not found" }, 404);
+    }
     const id = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO conversations (id, agent_type, title, project_id) VALUES (?, ?, ?, ?)")
-      .bind(id, agentType || "nexus", title || "New conversation", projectId || null)
+    await env.DB.prepare("INSERT INTO conversations (id, agent_type, title, project_id, user_id) VALUES (?, ?, ?, ?, ?)")
+      .bind(id, agentType || "nexus", title || "New conversation", projectId || null, user.userId)
       .run();
     return ok({ id });
   }
   if (path.startsWith("/api/conversations/") && request.method === "GET") {
+    const user = requireSession(session);
     const c = path.split("/")[3];
-    const conv = await env.DB.prepare("SELECT * FROM conversations WHERE id = ?").bind(c).first();
-    const msgs = await env.DB.prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC").bind(c).all();
+    const conv = await env.DB.prepare("SELECT * FROM conversations WHERE id = ? AND user_id = ?").bind(c, user.userId).first();
+    if (!conv) return ok({ error: "Not found" }, 404);
+    const msgs = await env.DB.prepare(
+      "SELECT m.* FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.conversation_id = ? AND c.user_id = ? ORDER BY m.created_at ASC",
+    ).bind(c, user.userId).all();
     return ok({ conversation: conv, messages: msgs.results });
   }
   if (path.startsWith("/api/conversations/") && request.method === "DELETE") {
-    const session = await authenticateRequest(request, env);
-    if (!session) return ok({ error: "Authentication required" }, 401);
+    const user = requireSession(session);
     const c = path.split("/")[3];
-    await env.DB.prepare("DELETE FROM messages WHERE conversation_id = ?").bind(c).run();
-    await env.DB.prepare("DELETE FROM conversations WHERE id = ?").bind(c).run();
+    const conv = await env.DB.prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?").bind(c, user.userId).first();
+    if (!conv) return ok({ error: "Not found" }, 404);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE id = ? AND user_id = ?)").bind(c, user.userId),
+      env.DB.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").bind(c, user.userId),
+    ]);
     return ok({ ok: true });
   }
 
   if (path === "/api/documents" && request.method === "POST") {
+    const user = requireSession(session);
     const fd = await request.formData();
     const file = fd.get("file") as File | null;
     if (!file) return ok({ error: "file required" }, 400);
     const id = crypto.randomUUID();
     const key = `documents/${id}/${file.name}`;
     await env.BUCKET.put(key, file.stream());
-    await env.DB.prepare("INSERT INTO documents (id, source, source_key, title, status) VALUES (?, 'r2', ?, ?, 'pending')")
-      .bind(id, key, file.name)
+    await env.DB.prepare("INSERT INTO documents (id, source, source_key, title, status, user_id) VALUES (?, 'r2', ?, ?, 'pending', ?)")
+      .bind(id, key, file.name, user.userId)
       .run();
     await env.DOC_QUEUE.send({ documentId: id, source: "r2", sourceKey: key, title: file.name });
     return ok({ documentId: id, status: "queued" });
   }
   if (path === "/api/documents" && request.method === "GET") {
-    const r = await env.DB.prepare("SELECT * FROM documents ORDER BY created_at DESC LIMIT 100").all();
+    const user = requireSession(session);
+    const r = await env.DB.prepare("SELECT * FROM documents WHERE user_id = ? ORDER BY created_at DESC LIMIT 100").bind(user.userId).all();
     return ok(r.results);
   }
+  if (path.startsWith("/api/documents/") && request.method === "GET") {
+    const user = requireSession(session);
+    const document = await env.DB.prepare("SELECT * FROM documents WHERE id = ? AND user_id = ?").bind(path.split("/")[3], user.userId).first();
+    if (!document) return ok({ error: "Not found" }, 404);
+    return ok(document);
+  }
   if (path === "/api/ingest" && request.method === "POST") {
+    const user = requireSession(session);
     const { text, title } = await parseJson<any>(request);
     if (!text) return ok({ error: "text required" }, 400);
     const id = crypto.randomUUID();
     const key = `documents/${id}/inline.txt`;
     await env.BUCKET.put(key, text);
-    await env.DB.prepare("INSERT INTO documents (id, source, source_key, title, status) VALUES (?, 'upload', ?, ?, 'pending')")
-      .bind(id, key, title || "Inline text")
+    await env.DB.prepare("INSERT INTO documents (id, source, source_key, title, status, user_id) VALUES (?, 'upload', ?, ?, 'pending', ?)")
+      .bind(id, key, title || "Inline text", user.userId)
       .run();
     await env.DOC_QUEUE.send({ documentId: id, source: "r2", sourceKey: key, title: title || "Inline text" });
     return ok({ documentId: id, status: "queued" });
@@ -302,16 +387,24 @@ async function handleApi(
   }
 
   if (path === "/api/artifacts" && request.method === "GET") {
+    const user = requireSession(session);
     const cId = url.searchParams.get("conversationId");
     if (cId) {
-      const r = await env.DB.prepare("SELECT * FROM artifacts WHERE conversation_id = ? ORDER BY created_at DESC").bind(cId).all();
+      const r = await env.DB.prepare(
+        "SELECT a.* FROM artifacts a JOIN conversations c ON c.id = a.conversation_id WHERE a.conversation_id = ? AND c.user_id = ? ORDER BY a.created_at DESC",
+      ).bind(cId, user.userId).all();
       return ok(r.results);
     }
-    const r = await env.DB.prepare("SELECT * FROM artifacts ORDER BY created_at DESC LIMIT 100").all();
+    const r = await env.DB.prepare(
+      "SELECT a.* FROM artifacts a JOIN conversations c ON c.id = a.conversation_id WHERE c.user_id = ? ORDER BY a.created_at DESC LIMIT 100",
+    ).bind(user.userId).all();
     return ok(r.results);
   }
   if (path.startsWith("/api/artifacts/") && request.method === "GET") {
-    const a = await env.DB.prepare("SELECT * FROM artifacts WHERE id = ?").bind(path.split("/")[3]).first();
+    const user = requireSession(session);
+    const a = await env.DB.prepare(
+      "SELECT a.* FROM artifacts a JOIN conversations c ON c.id = a.conversation_id WHERE a.id = ? AND c.user_id = ?",
+    ).bind(path.split("/")[3], user.userId).first();
     if (!a) return ok({ error: "Not found" }, 404);
     if (a.r2_key) {
       const obj = await env.BUCKET.get(a.r2_key as string);
@@ -320,7 +413,13 @@ async function handleApi(
     return ok(a);
   }
   if (path.startsWith("/api/images/") && request.method === "GET") {
-    const obj = await env.BUCKET.get(path.slice("/api/images/".length));
+    const user = requireSession(session);
+    const key = path.slice("/api/images/".length);
+    const artifact = await env.DB.prepare(
+      "SELECT a.r2_key FROM artifacts a JOIN conversations c ON c.id = a.conversation_id WHERE a.r2_key = ? AND c.user_id = ? LIMIT 1",
+    ).bind(key, user.userId).first<{ r2_key: string }>();
+    if (!artifact) return new Response("Not found", { status: 404 });
+    const obj = await env.BUCKET.get(artifact.r2_key);
     if (!obj) return new Response("Not found", { status: 404 });
     return new Response(obj.body, { headers: { "Content-Type": obj.httpMetadata?.contentType || "image/png" } });
   }
@@ -335,27 +434,31 @@ async function handleApi(
   }
 
   if (path === "/api/projects" && request.method === "GET") {
-    const r = await env.DB.prepare("SELECT * FROM projects ORDER BY created_at DESC").all();
+    const user = requireSession(session);
+    const r = await env.DB.prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC").bind(user.userId).all();
     return ok(r.results);
   }
   if (path === "/api/projects" && request.method === "POST") {
+    const user = requireSession(session);
     const { name, description, systemPrompt } = await parseJson<any>(request);
     if (!name) return ok({ error: "name required" }, 400);
     const id = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO projects (id, name, description, system_prompt) VALUES (?, ?, ?, ?)")
-      .bind(id, name, description || "", systemPrompt || "")
+    await env.DB.prepare("INSERT INTO projects (id, name, description, system_prompt, user_id) VALUES (?, ?, ?, ?, ?)")
+      .bind(id, name, description || "", systemPrompt || "", user.userId)
       .run();
     return ok({ id, name });
   }
   if (path.startsWith("/api/projects/") && request.method === "GET") {
+    const user = requireSession(session);
     const id = path.split("/")[3];
-    const p = await env.DB.prepare("SELECT * FROM projects WHERE id = ?").bind(id).first();
+    const p = await env.DB.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").bind(id, user.userId).first();
     if (!p) return ok({ error: "Not found" }, 404);
-    const convs = await env.DB.prepare("SELECT * FROM conversations WHERE project_id = ? ORDER BY updated_at DESC").bind(id).all();
+    const convs = await env.DB.prepare("SELECT * FROM conversations WHERE project_id = ? AND user_id = ? ORDER BY updated_at DESC").bind(id, user.userId).all();
     return ok({ project: p, conversations: convs.results });
   }
   if (path.startsWith("/api/projects/") && request.method === "DELETE") {
-    await env.DB.prepare("DELETE FROM projects WHERE id = ?").bind(path.split("/")[3]).run();
+    const user = requireSession(session);
+    await env.DB.prepare("DELETE FROM projects WHERE id = ? AND user_id = ?").bind(path.split("/")[3], user.userId).run();
     return ok({ ok: true });
   }
 
@@ -401,47 +504,56 @@ async function handleApi(
   }
 
   if (path === "/api/code/run" && request.method === "POST") {
+    const user = requireSession(session);
     const { code, language } = await parseJson<any>(request);
     if (!code) return ok({ error: "code required" }, 400);
-    return ok(await runCodeTool({ code, language }, env));
+    return ok(await runCodeTool({ code, language }, env, user.userId));
   }
   if (path === "/api/sandbox/exec" && request.method === "POST") {
+    const user = requireSession(session);
     const { command, args } = await parseJson<any>(request);
     if (!command || typeof command !== "string") return ok({ error: "command required" }, 400);
     const { getSandbox } = await import("@cloudflare/sandbox");
-    const s = getSandbox(env.SANDBOX, "default");
+    const s = getSandbox(env.SANDBOX, user.userId);
     const r = await s.exec(command, args || []);
     return ok({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode });
   }
   if (path === "/api/sandbox/write" && request.method === "POST") {
+    const user = requireSession(session);
     const { path: fp, content } = await parseJson<any>(request);
     if (!fp || typeof fp !== "string") return ok({ error: "path required" }, 400);
     const { getSandbox } = await import("@cloudflare/sandbox");
-    const s = getSandbox(env.SANDBOX, "default");
+    const s = getSandbox(env.SANDBOX, user.userId);
     await s.writeFile(fp, content);
     return ok({ ok: true });
   }
   if (path === "/api/sandbox/read" && request.method === "POST") {
+    const user = requireSession(session);
     const { path: fp } = await parseJson<any>(request);
     if (!fp || typeof fp !== "string") return ok({ error: "path required" }, 400);
     const { getSandbox } = await import("@cloudflare/sandbox");
-    const s = getSandbox(env.SANDBOX, "default");
+    const s = getSandbox(env.SANDBOX, user.userId);
     return ok({ content: await s.readFile(fp) });
   }
 
   if (path === "/api/tools/execute" && request.method === "POST") {
+    const user = requireSession(session);
     const { tool, args } = await parseJson<any>(request);
     if (!tool) return ok({ error: "tool required" }, 400);
-    return ok(await executeTool(tool, args, env));
+    return ok(await executeTool(tool, args, env, { userId: user.userId }));
   }
   if (path === "/api/browser/screenshot" && request.method === "POST") {
+    requireSession(session);
     const { url: t } = await parseJson<any>(request);
-    const r = await (env.BROWSER as any).quickAction("screenshot", { url: t });
+    const safe = assertPublicHttpUrl(t);
+    const r = await (env.BROWSER as any).quickAction("screenshot", { url: safe.toString() });
     return new Response(r.body, { headers: { "Content-Type": "image/png" } });
   }
   if (path === "/api/browser/markdown" && request.method === "POST") {
+    requireSession(session);
     const { url: t } = await parseJson<any>(request);
-    const r = await (env.BROWSER as any).quickAction("markdown", { url: t });
+    const safe = assertPublicHttpUrl(t);
+    const r = await (env.BROWSER as any).quickAction("markdown", { url: safe.toString() });
     return new Response(r.body, { headers: { "Content-Type": "text/markdown" } });
   }
 
@@ -468,7 +580,7 @@ async function handleApi(
   }
   if (path === "/api/auth/logout" && request.method === "POST") {
     const a = request.headers.get("Authorization");
-    if (a?.startsWith("Bearer ")) await deleteSession(env, a.slice(7));
+    if (a?.startsWith("Bearer ")) await deleteSession(env, a.slice(7).trim());
     return ok({ ok: true });
   }
 

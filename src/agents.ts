@@ -1,10 +1,8 @@
-import { Agent } from "agents";
+import { Agent, type ConnectionContext, type WSMessage } from "agents";
 import { getToolsForAgent } from "./tools";
 import { AGENT_MODELS } from "./models";
 import { executeTool } from "./tool-executor";
 import { streamChat } from "./streaming";
-
-type WSMessage = string | { type?: string; [key: string]: unknown };
 
 const CORE = `You are a frontier-grade AI agent. Optimize for correctness, useful action, and efficient reasoning. Classify the task internally before acting. Use tools when they materially improve accuracy or capability. Never invent facts, tool results, citations, files, or completed actions. For complex tasks, check constraints, alternatives, risks, and verification before answering. Keep private reasoning hidden; expose concise conclusions, evidence, assumptions, and actionable steps. Avoid filler and unnecessary questions. Preserve important context and verify changing facts when tools can resolve uncertainty.`;
 const NEXUS_PROMPT = `${CORE}\nYou are Nexus, the primary orchestrator. Coordinate reasoning, knowledge retrieval, tools, coding, browser/search, vision, artifacts, MCP, and specialist agents. Delegate when useful, then synthesize results into one coherent answer.`;
@@ -17,36 +15,46 @@ export class NexusAgent extends Agent {
   systemPrompt = NEXUS_PROMPT;
   agentType = "nexus";
   models = AGENT_MODELS.nexus;
-  async onConnect(c: any) { c.send(JSON.stringify({ type: "agent_connected", agent: this.agentType, model: this.models.primary })); }
+  async onConnect(c: any, ctx: ConnectionContext) { connectAgent(this, c, ctx); }
   async onMessage(c: any, m: WSMessage) { await handleAgentMessage(this, c, m); }
 }
 export class BuilderAgent extends Agent {
   systemPrompt = BUILDER_PROMPT;
   agentType = "builder";
   models = AGENT_MODELS.builder;
-  async onConnect(c: any) { c.send(JSON.stringify({ type: "agent_connected", agent: this.agentType, model: this.models.primary })); }
+  async onConnect(c: any, ctx: ConnectionContext) { connectAgent(this, c, ctx); }
   async onMessage(c: any, m: WSMessage) { await handleAgentMessage(this, c, m); }
 }
 export class ResearcherAgent extends Agent {
   systemPrompt = RESEARCHER_PROMPT;
   agentType = "researcher";
   models = AGENT_MODELS.researcher;
-  async onConnect(c: any) { c.send(JSON.stringify({ type: "agent_connected", agent: this.agentType, model: this.models.primary })); }
+  async onConnect(c: any, ctx: ConnectionContext) { connectAgent(this, c, ctx); }
   async onMessage(c: any, m: WSMessage) { await handleAgentMessage(this, c, m); }
 }
 export class CreativeAgent extends Agent {
   systemPrompt = CREATIVE_PROMPT;
   agentType = "creative";
   models = AGENT_MODELS.creative;
-  async onConnect(c: any) { c.send(JSON.stringify({ type: "agent_connected", agent: this.agentType, model: this.models.primary })); }
+  async onConnect(c: any, ctx: ConnectionContext) { connectAgent(this, c, ctx); }
   async onMessage(c: any, m: WSMessage) { await handleAgentMessage(this, c, m); }
 }
 export class AnalystAgent extends Agent {
   systemPrompt = ANALYST_PROMPT;
   agentType = "analyst";
   models = AGENT_MODELS.analyst;
-  async onConnect(c: any) { c.send(JSON.stringify({ type: "agent_connected", agent: this.agentType, model: this.models.primary })); }
+  async onConnect(c: any, ctx: ConnectionContext) { connectAgent(this, c, ctx); }
   async onMessage(c: any, m: WSMessage) { await handleAgentMessage(this, c, m); }
+}
+
+function connectAgent(agent: any, conn: any, context: ConnectionContext): void {
+  const userId = context.request.headers.get("X-Nexus-User-Id");
+  if (!userId) {
+    conn.close(1008, "Authentication required");
+    return;
+  }
+  conn.setState({ userId });
+  conn.send(JSON.stringify({ type: "agent_connected", agent: agent.agentType, model: agent.models.primary }));
 }
 
 async function persistTurn(env: any, conversationId: string | undefined, userContent: string, assistant: string, model: string, agentType: string, usage: { input_tokens?: number; output_tokens?: number }, latency: number, artifacts: any[]) {
@@ -58,6 +66,11 @@ async function persistTurn(env: any, conversationId: string | undefined, userCon
   await env.DB.prepare(
     "INSERT INTO messages (id, conversation_id, role, content, model, agent_type, tokens_in, tokens_out, latency_ms, artifacts) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?)",
   ).bind(crypto.randomUUID(), conversationId, assistant, model, agentType, usage.input_tokens || 0, usage.output_tokens || 0, latency, artifactJson).run();
+  for (const artifact of artifacts) {
+    await env.DB.prepare(
+      "INSERT INTO artifacts (id, conversation_id, type, title, language, content, r2_key) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).bind(crypto.randomUUID(), conversationId, artifact?.type || "code", artifact?.title || null, artifact?.language || null, artifact?.content || null, artifact?.r2_key || null).run();
+  }
   await env.DB.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").bind(conversationId).run();
 }
 
@@ -69,17 +82,33 @@ async function handleAgentMessage(agent: any, conn: any, message: WSMessage) {
     conn.send(JSON.stringify({ type: "error", error: "Invalid message" }));
     return;
   }
+  if (msg === null || typeof msg !== "object" || Array.isArray(msg) || msg instanceof ArrayBuffer || ArrayBuffer.isView(msg)) {
+    conn.send(JSON.stringify({ type: "error", error: "Invalid message" }));
+    return;
+  }
   if (msg.type === "chat") {
     const { content, conversationId, images, model, stream } = msg;
     if (!content || typeof content !== "string") {
       conn.send(JSON.stringify({ type: "error", error: "content required" }));
       return;
     }
+    const userId = conn.state?.userId;
+    if (!userId) {
+      conn.send(JSON.stringify({ type: "error", error: "Authentication required" }));
+      return;
+    }
+    if (conversationId) {
+      const conversation = await agent.env.DB.prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?").bind(conversationId, userId).first();
+      if (!conversation) {
+        conn.send(JSON.stringify({ type: "error", error: "Conversation not found" }));
+        return;
+      }
+    }
     const history = (agent.state.history || []) as any[];
     const tools = getToolsForAgent(agent.agentType);
     const selectedModel = model || agent.models.primary;
     const messages: any[] = [{ role: "system", content: agent.systemPrompt }, ...history.slice(-24)];
-    if (images?.length) {
+    if (Array.isArray(images) && images.length) {
       messages.push({
         role: "user",
         content: [{ type: "text", text: content }, ...images.map((u: string) => ({ type: "image_url", image_url: { url: u } }))],
@@ -96,6 +125,7 @@ async function handleAgentMessage(agent: any, conn: any, message: WSMessage) {
         messages: messages.slice(1),
         agentType: agent.agentType,
         env: agent.env,
+        userId,
         onToken: (t) => conn.send(JSON.stringify({ type: "stream_token", token: t })),
         onToolCall: (tool, args) => conn.send(JSON.stringify({ type: "tool_call", tool, args })),
         onToolResult: (tool, result) => conn.send(JSON.stringify({ type: "tool_result", tool, result: result.slice(0, 500) })),
@@ -130,9 +160,15 @@ async function handleAgentMessage(agent: any, conn: any, message: WSMessage) {
         const toolResults: any[] = [];
         for (const tc of toolCalls) {
           const fnName = tc.function?.name || tc.name;
-          const fnArgs = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : tc.function?.arguments || tc.arguments || {};
+          let fnArgs: any;
+          try {
+            fnArgs = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : tc.function?.arguments || tc.arguments || {};
+          } catch {
+            conn.send(JSON.stringify({ type: "error", error: "Invalid tool arguments" }));
+            return;
+          }
           conn.send(JSON.stringify({ type: "tool_call", tool: fnName, args: fnArgs }));
-          const tr = await executeTool(fnName, fnArgs, agent.env, agent);
+          const tr = await executeTool(fnName, fnArgs, agent.env, { storage: agent.storage, userId });
           if (tr.artifact) {
             allArtifacts.push(tr.artifact);
             conn.send(JSON.stringify({ type: "artifact", artifact: tr.artifact }));

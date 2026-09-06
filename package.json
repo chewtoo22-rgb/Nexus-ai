@@ -6,7 +6,7 @@
     "dev": "wrangler dev --remote",
     "deploy": "wrangler deploy",
     "setup": "bash setup.sh",
-    "db:init": "wrangler d1 execute nemotron-nexus-db --file=./schema.sql --remote",
+    "db:init": "wrangler d1 migrations apply nemotron-nexus-db --remote",
     "tail": "wrangler tail",
     "typecheck": "tsc --noEmit"
   },

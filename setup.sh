@@ -12,7 +12,7 @@ echo "Creating Vectorize index..."
 npx wrangler vectorize create nemotron-nexus-index --dimensions=1024 --metric=cosine
 echo "Creating Queue..."
 npx wrangler queues create nemotron-nexus-docs
-echo "Initializing D1 schema..."
-npx wrangler d1 execute nemotron-nexus-db --file=./schema.sql --remote
+echo "Initializing and migrating D1 schema..."
+npx wrangler d1 migrations apply nemotron-nexus-db --remote
 echo "Done. Copy the printed IDs into wrangler.jsonc (replace REPLACE_WITH_...), then: npm install && npm run deploy"
 echo "Deploy will fail until those placeholders are real Cloudflare IDs."

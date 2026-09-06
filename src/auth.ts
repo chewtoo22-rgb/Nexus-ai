@@ -47,8 +47,26 @@ export async function deleteSession(env: any, token: string): Promise<void> {
 
 export async function authenticateRequest(request: Request, env: any): Promise<Session | null> {
   const auth = request.headers.get("Authorization");
-  if (!auth?.startsWith("Bearer ")) return null;
-  return getSession(env, auth.slice(7).trim());
+  let token = auth?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+
+  if (!token && request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+    token = new URL(request.url).searchParams.get("token")?.trim() || undefined;
+    if (!token) {
+      const protocols = (request.headers.get("Sec-WebSocket-Protocol") || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const bearerIndex = protocols.findIndex((value) => value.toLowerCase() === "bearer");
+      const accessTokenIndex = protocols.findIndex((value) => value.toLowerCase() === "access_token");
+      token = bearerIndex >= 0
+        ? protocols[bearerIndex + 1]
+        : accessTokenIndex >= 0
+          ? protocols[accessTokenIndex + 1]
+          : protocols.find((value) => value.toLowerCase().startsWith("bearer."))?.slice(7) || (protocols.length === 1 ? protocols[0] : undefined);
+    }
+  }
+
+  return token ? getSession(env, token) : null;
 }
 
 export async function requireUser(request: Request, env: any): Promise<Session> {
@@ -63,6 +81,7 @@ export async function requireUser(request: Request, env: any): Promise<Session> 
 
 export async function registerUser(env: any, email: string, password: string): Promise<Session> {
   const normalized = normalizeEmail(email);
+  assertEmail(normalized);
   assertPassword(password);
   const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(normalized).first();
   if (existing) {
@@ -93,6 +112,14 @@ export async function loginUser(env: any, email: string, password: string): Prom
 
 function normalizeEmail(email: string): string {
   return String(email || "").trim().toLowerCase();
+}
+
+function assertEmail(email: string): void {
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    const err = new Error("Valid email required");
+    (err as Error & { status: number }).status = 400;
+    throw err;
+  }
 }
 
 function assertPassword(password: string): void {

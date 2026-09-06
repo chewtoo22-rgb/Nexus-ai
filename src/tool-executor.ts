@@ -72,8 +72,8 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
       const id = crypto.randomUUID();
       const key = `documents/${id}/inline.txt`;
       await env.BUCKET.put(key, args.text);
-      await env.DB.prepare("INSERT INTO documents (id, source, source_key, title, status) VALUES (?, 'upload', ?, ?, 'pending')")
-        .bind(id, key, args.title || "Inline text")
+      await env.DB.prepare("INSERT INTO documents (id, source, source_key, title, status, user_id) VALUES (?, 'upload', ?, ?, 'pending', ?)")
+        .bind(id, key, args.title || "Inline text", ctx?.userId || null)
         .run();
       await env.DOC_QUEUE.send({ documentId: id, source: "r2", sourceKey: key, title: args.title || "Inline text" });
       return { result: `Document queued. ID: ${id}` };
@@ -96,7 +96,7 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
     }
     case "speech_to_text": {
       const safe = assertPublicHttpUrl(args.audio_url);
-      const ar = await fetch(safe.toString());
+      const ar = await fetch(safe.toString(), { redirect: "manual" });
       const ab = await ar.blob();
       const r = await env.AI.run(MODELS.stt.batch, { audio: [...new Uint8Array(await ab.arrayBuffer())] });
       return { result: (r as any).text || JSON.stringify(r) };
@@ -129,7 +129,8 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
     }
     case "run_code": {
       const { runCodeTool } = await import("./code-exec");
-      return await runCodeTool(args, env);
+      if (!ctx?.userId) return { result: "Authentication required for code execution." };
+      return await runCodeTool(args, env, ctx.userId);
     }
     default:
       return { result: `Unknown tool: ${toolName}` };
