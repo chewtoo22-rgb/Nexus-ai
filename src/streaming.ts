@@ -18,6 +18,11 @@ export interface StreamConfig {
   onError?: (e: string) => void;
 }
 
+/**
+ * Streams a chat completion with tool calling support and fallback to non-streaming on error.
+ * Handles text deltas, tool calls, artifacts, and usage reporting via callbacks.
+ * @param config Configuration object with model, messages, tools, and event callbacks.
+ */
 export async function streamChat(config: StreamConfig): Promise<void> {
   const workersai = createWorkersAI({ binding: config.env.AI });
   const tools = config.tools || getToolsForAgent(config.agentType);
@@ -85,6 +90,12 @@ export async function streamChat(config: StreamConfig): Promise<void> {
   }
 }
 
+/**
+ * Sends a Server-Sent Event (SSE) message to the stream controller.
+ * @param controller The ReadableStream controller.
+ * @param event The event type name.
+ * @param data The data payload to include in the event.
+ */
 export function sseSend(controller: ReadableStreamDefaultController, event: string, data: Record<string, unknown>): void {
   const payload = { type: event, ...data };
   controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
