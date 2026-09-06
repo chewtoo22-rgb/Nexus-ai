@@ -9,6 +9,12 @@ const BLOCKED_HOSTS = new Set([
   "metadata.internal",
 ]);
 
+/**
+ * Checks if a hostname is a private IPv4 address.
+ * Detects RFC 1918 private ranges, loopback, link-local, and shared address space.
+ * @param host The hostname to check.
+ * @returns True if the address is private, false otherwise.
+ */
 function isPrivateIPv4(host: string): boolean {
   const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false;
@@ -23,6 +29,13 @@ function isPrivateIPv4(host: string): boolean {
   return false;
 }
 
+/**
+ * Validates and parses a URL, ensuring it is a public HTTP(S) URL and not targeting private infrastructure.
+ * Blocks localhost, private IPs, metadata endpoints, and special TLDs.
+ * @param raw The raw URL string.
+ * @returns A parsed URL object if valid and public.
+ * @throws Error if URL is invalid, not HTTP(S), or targets private/blocked infrastructure.
+ */
 export function assertPublicHttpUrl(raw: unknown): URL {
   if (typeof raw !== "string" || !raw.trim()) throw new Error("URL required");
   let url: URL;
@@ -47,6 +60,12 @@ export function assertPublicHttpUrl(raw: unknown): URL {
   return url;
 }
 
+/**
+ * Compares two byte arrays in constant time to prevent timing attacks.
+ * @param a The first byte array.
+ * @param b The second byte array.
+ * @returns True if arrays are equal, false otherwise.
+ */
 export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -54,6 +73,11 @@ export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
+/**
+ * Converts a hexadecimal string to a byte array.
+ * @param hex The hexadecimal string.
+ * @returns A Uint8Array of the decoded bytes.
+ */
 export function bytesFromHex(hex: string): Uint8Array {
   const clean = hex.replace(/[^0-9a-f]/gi, "");
   if (clean.length % 2 !== 0) return new Uint8Array(0);
@@ -62,10 +86,21 @@ export function bytesFromHex(hex: string): Uint8Array {
   return out;
 }
 
+/**
+ * Converts a byte array to a hexadecimal string.
+ * @param bytes The byte array.
+ * @returns A lowercase hexadecimal string.
+ */
 export function toHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Parses JSON from a request body, throwing a descriptive error on failure.
+ * @param request The incoming HTTP request.
+ * @returns The parsed JSON object.
+ * @throws Error if JSON parsing fails.
+ */
 export async function parseJson<T = Record<string, unknown>>(request: Request): Promise<T> {
   try {
     return (await request.json()) as T;

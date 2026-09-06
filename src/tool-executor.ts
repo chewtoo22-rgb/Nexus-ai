@@ -153,6 +153,13 @@ function stripDangerousBlocks(input: string): string {
   return parse5.serialize(document);
 }
 
+/**
+ * Fetches a URL and converts its content to markdown, with URL validation to prevent SSRF.
+ * Falls back to manual HTML stripping if browser service unavailable.
+ * @param env The environment containing BROWSER binding.
+ * @param url The URL to fetch (must be public HTTP/HTTPS).
+ * @returns A ToolCallResult with the markdown/text content (max 8000 chars).
+ */
 async function browserFetchMarkdown(env: any, url: string): Promise<ToolCallResult> {
   const safe = assertPublicHttpUrl(url);
   try {
@@ -167,6 +174,12 @@ async function browserFetchMarkdown(env: any, url: string): Promise<ToolCallResu
   }
 }
 
+/**
+ * Takes a screenshot of a URL and stores it in R2, with URL validation to prevent SSRF.
+ * @param env The environment containing BROWSER and BUCKET bindings.
+ * @param url The URL to screenshot (must be public HTTP/HTTPS).
+ * @returns A ToolCallResult with the R2 key and an image artifact.
+ */
 async function browserScreenshot(env: any, url: string): Promise<ToolCallResult> {
   const safe = assertPublicHttpUrl(url);
   try {
@@ -179,6 +192,13 @@ async function browserScreenshot(env: any, url: string): Promise<ToolCallResult>
   }
 }
 
+/**
+ * Extracts data from a URL using a CSS selector, with URL validation to prevent SSRF.
+ * @param env The environment containing BROWSER binding.
+ * @param url The URL to extract from (must be public HTTP/HTTPS).
+ * @param selector The CSS selector to extract.
+ * @returns A ToolCallResult with the extracted JSON content (max 8000 chars).
+ */
 async function browserExtract(env: any, url: string, selector: string): Promise<ToolCallResult> {
   const safe = assertPublicHttpUrl(url);
   try {

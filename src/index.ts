@@ -74,6 +74,12 @@ const AUTH_PREFIXES = [
   "/api/stats",
 ];
 
+/**
+ * Determines if an API path and HTTP method require authentication.
+ * @param path The request path.
+ * @param method The HTTP method.
+ * @returns True if authentication is required, false otherwise.
+ */
 function needsAuth(path: string, method: string): boolean {
   if (AUTH_PREFIXES.some((p) => path === p || path.startsWith(p))) return true;
   if (path === "/api/conversations" && method === "GET") return true;
@@ -83,6 +89,13 @@ function needsAuth(path: string, method: string): boolean {
   return false;
 }
 
+/**
+ * Creates a JSON response with optional status and extra headers.
+ * @param data The data to serialize as JSON.
+ * @param status The HTTP status code (default 200).
+ * @param extra Additional headers to include.
+ * @returns A Response object with JSON content.
+ */
 function json(data: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -90,6 +103,12 @@ function json(data: unknown, status = 200, extra: Record<string, string> = {}): 
   });
 }
 
+/**
+ * Converts an error into an HTTP JSON error response.
+ * Extracts status code from error.status if present, defaults to 400.
+ * @param err The error object.
+ * @returns A JSON Response with error message and appropriate status.
+ */
 function httpError(err: unknown): Response {
   const message = err instanceof Error ? err.message : "Request failed";
   const status = typeof (err as { status?: number })?.status === "number" ? (err as { status: number }).status : 400;
@@ -161,6 +180,16 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+/**
+ * Handles all API route requests, dispatching to appropriate endpoints.
+ * @param request The incoming HTTP request.
+ * @param env The Cloudflare Worker environment bindings.
+ * @param path The request path.
+ * @param url The parsed URL object.
+ * @param ok Helper function to create JSON responses with rate-limit headers.
+ * @param rlH Rate-limit headers to include in responses.
+ * @returns A Response object for the API request.
+ */
 async function handleApi(
   request: Request,
   env: Env,

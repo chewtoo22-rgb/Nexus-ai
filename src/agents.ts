@@ -49,6 +49,18 @@ export class AnalystAgent extends Agent {
   async onMessage(c: any, m: WSMessage) { await handleAgentMessage(this, c, m); }
 }
 
+/**
+ * Persists a conversation turn (user message and assistant response) to the database.
+ * @param env The environment containing the DB binding.
+ * @param conversationId The conversation ID, if any.
+ * @param userContent The user's message content.
+ * @param assistant The assistant's response content.
+ * @param model The model used.
+ * @param agentType The agent type identifier.
+ * @param usage Token usage statistics.
+ * @param latency Response latency in milliseconds.
+ * @param artifacts Any artifacts generated during the turn.
+ */
 async function persistTurn(env: any, conversationId: string | undefined, userContent: string, assistant: string, model: string, agentType: string, usage: { input_tokens?: number; output_tokens?: number }, latency: number, artifacts: any[]) {
   if (!conversationId || !env?.DB) return;
   const artifactJson = artifacts.length ? JSON.stringify(artifacts) : null;
@@ -61,6 +73,13 @@ async function persistTurn(env: any, conversationId: string | undefined, userCon
   await env.DB.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").bind(conversationId).run();
 }
 
+/**
+ * Handles incoming WebSocket messages for an agent, including chat requests, history queries, and clear commands.
+ * Supports both streaming and non-streaming chat, tool calling, and artifact generation.
+ * @param agent The agent instance handling the message.
+ * @param conn The WebSocket connection.
+ * @param message The incoming message (string or object).
+ */
 async function handleAgentMessage(agent: any, conn: any, message: WSMessage) {
   let msg: any;
   try {
