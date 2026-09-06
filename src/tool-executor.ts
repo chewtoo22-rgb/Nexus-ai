@@ -50,9 +50,21 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
   }
 }
 
+function stripDangerousBlocks(input: string): string {
+  let previous: string;
+  let current = input;
+  do {
+    previous = current;
+    current = current
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "");
+  } while (current !== previous);
+  return current;
+}
+
 async function browserFetchMarkdown(env: any, url: string): Promise<ToolCallResult> {
   try { const r = await env.BROWSER.quickAction("markdown", { url }); return { result: (await r.text()).slice(0, 8000) }; }
-  catch { const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } }); const h = await r.text(); return { result: h.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 8000) }; }
+  catch { const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } }); const h = await r.text(); const sanitized = stripDangerousBlocks(h); return { result: sanitized.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 8000) }; }
 }
 async function browserScreenshot(env: any, url: string): Promise<ToolCallResult> {
   try { const r = await env.BROWSER.quickAction("screenshot", { url }); const k = `screenshots/${Date.now()}-${Math.random().toString(36).slice(2)}.png`; await env.BUCKET.put(k, await r.arrayBuffer()); return { result: `Screenshot saved: ${k}`, artifact: { type: "image", title: `Screenshot of ${url}`, r2_key: k } }; }
