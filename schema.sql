@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   agent_type TEXT NOT NULL DEFAULT 'nexus',
@@ -19,6 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_conversations_agent ON conversations(agent_type);
 CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
+
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
   conversation_id TEXT NOT NULL,
@@ -37,6 +39,7 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+
 CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
   source TEXT NOT NULL,
@@ -50,6 +53,7 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
 CREATE INDEX IF NOT EXISTS idx_documents_project ON documents(project_id);
+
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY,
   conversation_id TEXT NOT NULL,
@@ -61,6 +65,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_conv ON artifacts(conversation_id);
+
 CREATE TABLE IF NOT EXISTS mcp_connections (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -69,6 +74,7 @@ CREATE TABLE IF NOT EXISTS mcp_connections (
   tools TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
 CREATE TABLE IF NOT EXISTS plugins (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -78,6 +84,7 @@ CREATE TABLE IF NOT EXISTS plugins (
   enabled INTEGER DEFAULT 1,
   installed_at TEXT DEFAULT (datetime('now'))
 );
+
 CREATE TABLE IF NOT EXISTS usage (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   conversation_id TEXT,
@@ -93,6 +100,7 @@ CREATE TABLE IF NOT EXISTS usage (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_agent ON usage(agent_type);
 CREATE INDEX IF NOT EXISTS idx_usage_created ON usage(created_at);
+
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -101,3 +109,32 @@ CREATE TABLE IF NOT EXISTS projects (
   user_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS missions (
+  id TEXT PRIMARY KEY,
+  goal TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','planning','running','completed','failed','cancelled')),
+  orchestrator TEXT NOT NULL DEFAULT 'sirius',
+  project_id TEXT,
+  result TEXT,
+  error TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status);
+CREATE INDEX IF NOT EXISTS idx_missions_updated ON missions(updated_at);
+
+CREATE TABLE IF NOT EXISTS mission_steps (
+  id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL,
+  step_index INTEGER NOT NULL,
+  agent TEXT NOT NULL,
+  title TEXT NOT NULL,
+  task TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','completed','failed')),
+  result TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(mission_id, step_index)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_steps_mission ON mission_steps(mission_id, step_index);
