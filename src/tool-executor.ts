@@ -1,4 +1,5 @@
 import { MODELS } from "./models";
+import * as parse5 from "parse5";
 
 export interface ToolCallResult {
   result: string;
@@ -50,9 +51,28 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
   }
 }
 
+function stripDangerousBlocks(input: string): string {
+  const document = parse5.parse(input) as any;
+  const blocked = new Set(["script", "style", "noscript"]);
+
+  const walk = (node: any): void => {
+    if (!node || !Array.isArray(node.childNodes)) return;
+
+    node.childNodes = node.childNodes.filter((child: any) => {
+      const tagName = typeof child?.tagName === "string" ? child.tagName.toLowerCase() : "";
+      return !blocked.has(tagName);
+    });
+
+    for (const child of node.childNodes) walk(child);
+  };
+
+  walk(document);
+  return parse5.serialize(document);
+}
+
 async function browserFetchMarkdown(env: any, url: string): Promise<ToolCallResult> {
   try { const r = await env.BROWSER.quickAction("markdown", { url }); return { result: (await r.text()).slice(0, 8000) }; }
-  catch { const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } }); const h = await r.text(); return { result: h.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 8000) }; }
+  catch { const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } }); const h = await r.text(); const sanitized = stripDangerousBlocks(h); return { result: sanitized.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 8000) }; }
 }
 async function browserScreenshot(env: any, url: string): Promise<ToolCallResult> {
   try { const r = await env.BROWSER.quickAction("screenshot", { url }); const k = `screenshots/${Date.now()}-${Math.random().toString(36).slice(2)}.png`; await env.BUCKET.put(k, await r.arrayBuffer()); return { result: `Screenshot saved: ${k}`, artifact: { type: "image", title: `Screenshot of ${url}`, r2_key: k } }; }
