@@ -1,18 +1,19 @@
 {
-  "name": "nemotron-nexus",
-  "version": "3.0.0",
+  "name": "nexus-ai",
+  "version": "3.0.1",
   "private": true,
   "scripts": {
     "dev": "wrangler dev --remote",
     "deploy": "wrangler deploy",
     "setup": "bash setup.sh",
     "db:init": "wrangler d1 execute nemotron-nexus-db --file=./schema.sql --remote",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "agents": "^0.22.0",
     "@cloudflare/voice": "latest",
-    "ai": "^4.3.0",
+    "ai": "^4.3.19",
     "workers-ai-provider": "^2.0.0",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
