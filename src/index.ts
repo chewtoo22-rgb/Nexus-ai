@@ -27,7 +27,11 @@ const AGENT_MAP = { nexus: "NEXUS_AGENT", builder: "BUILDER_AGENT", researcher: 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url); const path = url.pathname;
-    if (!path.startsWith("/api/") && path !== "/mcp" && !path.startsWith("/voice")) return env.ASSETS.fetch(request);
+    // Serve static assets for non-API routes (requires assets binding in wrangler.jsonc)
+    if (!path.startsWith("/api/") && path !== "/mcp" && !path.startsWith("/voice")) {
+      if (env.ASSETS) return env.ASSETS.fetch(request);
+      return new Response("Static assets not configured. Add assets.directory in wrangler.jsonc.", { status: 503 });
+    }
     if (path === "/mcp" || path === "/mcp/") { return env.NEXUS_MCP.get(env.NEXUS_MCP.idFromName("default")).fetch(request); }
     if (path === "/voice" && request.headers.get("Upgrade") === "websocket") { return env.VOICE_AGENT.get(env.VOICE_AGENT.idFromName("default")).fetch(request); }
     if (path.startsWith("/api/agent/") && request.headers.get("Upgrade") === "websocket") {
@@ -37,10 +41,17 @@ export default {
       return (env as any)[bindingName].get((env as any)[bindingName].idFromName(agentId)).fetch(request);
     }
     const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
-    const rl = await checkRateLimit(env, clientIP); const rlH = getRateLimitHeaders(rl);
+    const rl = await checkRateLimit(env, clientIP);
+    const rlH = getRateLimitHeaders(rl);
+    if (!rl.allowed) {
+      return new Response(JSON.stringify({ error: "Rate limit exceeded", remaining: 0 }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": String(Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000))), ...rlH },
+      });
+    }
     const json = (d: any, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "Content-Type": "application/json", ...rlH } });
 
-    if (path === "/api/health") return json({ name: "nemotron-nexus", version: "3.0.0", status: "online", agents: Object.keys(AGENT_MAP), features: ["mcp-server", "streaming", "sandbox", "connectors", "plugins", "voice", "auth", "rate-limiting", "projects"], models: { chat: Object.values(MODELS.chat), vision: Object.values(MODELS.vision), imageGen: Object.values(MODELS.imageGen) }, connectors: CONNECTORS.length, plugins: BUILTIN_PLUGINS.length });
+    if (path === "/api/health") return json({ name: "nexus-ai", version: "3.0.0", status: "online", agents: Object.keys(AGENT_MAP), features: ["mcp-server", "streaming", "sandbox", "connectors", "plugins", "voice", "auth", "rate-limiting", "projects"], models: { chat: Object.values(MODELS.chat), vision: Object.values(MODELS.vision), imageGen: Object.values(MODELS.imageGen) }, connectors: CONNECTORS.length, plugins: BUILTIN_PLUGINS.length });
 
     if (path === "/api/chat" && request.method === "POST") {
       const { message, agent, sessionId, model, images, stream } = await request.json() as any;
