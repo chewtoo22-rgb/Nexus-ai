@@ -1,22 +1,18 @@
 import { Agent } from "agents";
-import {
-  withVoice,
-  WorkersAIFluxSTT,
-  WorkersAITTS,
-  type VoiceTurnContext,
-} from "@cloudflare/voice";
+import { withVoice, WorkersAIFluxSTT, WorkersAITTS, type VoiceTurnContext } from "@cloudflare/voice";
 import { streamText } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { MODELS } from "./models";
 
+type VoiceEnv = { AI: Ai };
 const VoiceAgent = withVoice(Agent);
 
 export class NexusVoiceAgent extends VoiceAgent {
-  transcriber = new WorkersAIFluxSTT(this.env.AI);
-  tts = new WorkersAITTS(this.env.AI);
+  transcriber = new WorkersAIFluxSTT((this.env as VoiceEnv).AI);
+  tts = new WorkersAITTS((this.env as VoiceEnv).AI);
 
   async onTurn(transcript: string, context: VoiceTurnContext) {
-    const workersai = createWorkersAI({ binding: this.env.AI });
+    const workersai = createWorkersAI({ binding: (this.env as VoiceEnv).AI });
     const result = streamText({
       model: workersai(MODELS.chat.flagship),
       system: "You are Nexus, a helpful voice assistant. Keep responses concise and conversational.",
