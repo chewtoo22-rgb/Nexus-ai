@@ -45,6 +45,12 @@ export async function deleteSession(env: any, token: string): Promise<void> {
   await env.SESSIONS.delete(`session:${token}`);
 }
 
+/**
+ * Authenticates an HTTP or WebSocket request by extracting and validating the bearer token from Authorization header, query string, or WebSocket protocols.
+ * @param request The incoming request
+ * @param env Environment bindings
+ * @returns Session object if authenticated, null otherwise
+ */
 export async function authenticateRequest(request: Request, env: any): Promise<Session | null> {
   const auth = request.headers.get("Authorization");
   let token = auth?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
@@ -79,6 +85,14 @@ export async function requireUser(request: Request, env: any): Promise<Session> 
   return session;
 }
 
+/**
+ * Registers a new user with email and password, validating input and creating a session.
+ * @param env Environment bindings
+ * @param email User email address
+ * @param password User password
+ * @returns New session for the registered user
+ * @throws Error if email is invalid, already registered, or password doesn't meet requirements
+ */
 export async function registerUser(env: any, email: string, password: string): Promise<Session> {
   const normalized = normalizeEmail(email);
   assertEmail(normalized);
@@ -114,6 +128,11 @@ function normalizeEmail(email: string): string {
   return String(email || "").trim().toLowerCase();
 }
 
+/**
+ * Validates email format and length, throwing a 400 error if invalid.
+ * @param email Email address to validate
+ * @throws Error with status 400 if email is invalid
+ */
 function assertEmail(email: string): void {
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     const err = new Error("Valid email required");

@@ -19,6 +19,10 @@ export interface StreamConfig {
   onError?: (e: string) => void;
 }
 
+/**
+ * Streams AI chat completion with tool execution support, including fallback to non-streaming mode on error.
+ * @param config Stream configuration with model, messages, tools, and callbacks
+ */
 export async function streamChat(config: StreamConfig): Promise<void> {
   const workersai = createWorkersAI({ binding: config.env.AI });
   const tools = config.tools || getToolsForAgent(config.agentType);

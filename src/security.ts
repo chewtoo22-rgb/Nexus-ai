@@ -23,6 +23,11 @@ function isPrivateIPv4(host: string): boolean {
   return false;
 }
 
+/**
+ * Extracts IPv4 address from IPv6-mapped IPv4 address (e.g., ::ffff:192.0.2.1).
+ * @param host IPv6 host string
+ * @returns Extracted IPv4 address or null if not a mapped IPv4
+ */
 function mappedIPv4(host: string): string | null {
   const match = host.match(/^(?:::|0:0:0:0:0:)ffff:(.+)$/i);
   if (!match) return null;
@@ -34,12 +39,23 @@ function mappedIPv4(host: string): string | null {
   return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
 }
 
+/**
+ * Creates an Error with status 400 for client-side validation failures.
+ * @param message Error message
+ * @returns Error object with status property set to 400
+ */
 function clientError(message: string): Error {
   const err = new Error(message);
   (err as Error & { status: number }).status = 400;
   return err;
 }
 
+/**
+ * Validates and parses a URL, ensuring it's a public HTTP(S) URL and blocking private IPs, local hostnames, and embedded IPv4 addresses.
+ * @param raw Raw URL string
+ * @returns Parsed URL object
+ * @throws Error with status 400 if URL is invalid or points to a blocked/private address
+ */
 export function assertPublicHttpUrl(raw: unknown): URL {
   if (typeof raw !== "string" || !raw.trim()) throw clientError("URL required");
   let url: URL;
@@ -86,6 +102,12 @@ export function toHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Parses JSON request body, throwing a 400 error if parsing fails.
+ * @param request HTTP request with JSON body
+ * @returns Parsed JSON object
+ * @throws Error with status 400 if JSON is invalid
+ */
 export async function parseJson<T = Record<string, unknown>>(request: Request): Promise<T> {
   try {
     return (await request.json()) as T;

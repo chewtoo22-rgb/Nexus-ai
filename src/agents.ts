@@ -52,6 +52,12 @@ export class ResearcherAgent extends Agent { systemPrompt = RESEARCHER_PROMPT; a
 export class CreativeAgent extends Agent { systemPrompt = CREATIVE_PROMPT; agentType = "creative"; models = AGENT_MODELS.creative; async onConnect(c: any) { c.send(JSON.stringify({ type: "agent_connected", agent: this.agentType, model: this.models.primary })); } async onMessage(c: any, m: WSMessage) { await handleAgentMessage(this, c, m); } }
 export class AnalystAgent extends Agent { systemPrompt = ANALYST_PROMPT; agentType = "analyst"; models = AGENT_MODELS.analyst; async onConnect(c: any) { c.send(JSON.stringify({ type: "agent_connected", agent: "sirius", model: this.models.primary })); } async onMessage(c: any, m: WSMessage) { await handleAgentMessage(this, c, m); } }
 
+/**
+ * Establishes WebSocket connection for an agent, authenticates via X-Nexus-User-Id header, and sends agent_connected event.
+ * @param agent The agent instance
+ * @param conn WebSocket connection
+ * @param context Connection context containing request headers
+ */
 function connectAgent(agent: any, conn: any, context: ConnectionContext): void {
   const userId = context.request.headers.get("X-Nexus-User-Id");
   if (!userId) {
@@ -62,6 +68,18 @@ function connectAgent(agent: any, conn: any, context: ConnectionContext): void {
   conn.send(JSON.stringify({ type: "agent_connected", agent: agent.agentType, model: agent.models.primary }));
 }
 
+/**
+ * Persists a conversation turn (user message, assistant response, and artifacts) to the database.
+ * @param env Environment bindings
+ * @param conversationId Conversation ID
+ * @param userContent User message content
+ * @param assistant Assistant response content
+ * @param model Model identifier
+ * @param agentType Agent type identifier
+ * @param usage Token usage statistics
+ * @param latency Response latency in milliseconds
+ * @param artifacts Array of generated artifacts
+ */
 async function persistTurn(env: any, conversationId: string | undefined, userContent: string, assistant: string, model: string, agentType: string, usage: { input_tokens?: number; output_tokens?: number }, latency: number, artifacts: any[]) {
   if (!conversationId || !env?.DB) return;
   const artifactJson = artifacts.length ? JSON.stringify(artifacts) : null;
@@ -81,6 +99,12 @@ async function persistTurn(env: any, conversationId: string | undefined, userCon
   await env.DB.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").bind(conversationId).run();
 }
 
+/**
+ * Handles incoming WebSocket messages from an agent connection, routing chat requests, tool calls, and history operations.
+ * @param agent The agent instance
+ * @param conn WebSocket connection
+ * @param message Incoming message (string or object)
+ */
 async function handleAgentMessage(agent: any, conn: any, message: WSMessage) {
   let msg: any;  try { msg = typeof message === "string" ? JSON.parse(message) : message; } catch { conn.send(JSON.stringify({ type: "error", error: "Invalid message" })); return; }
   if (msg.type === "chat") {

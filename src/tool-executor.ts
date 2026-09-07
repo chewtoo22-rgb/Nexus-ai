@@ -15,6 +15,14 @@ const DELEGATE_PROMPTS: Record<string, string> = {
   analyst: "You are Sirius, an analyst. Quantify tradeoffs and finish with a recommendation.",
 };
 
+/**
+ * Executes a named tool with provided arguments, supporting web search, browser actions, code execution, and AI capabilities.
+ * @param toolName Tool identifier
+ * @param args Tool-specific arguments
+ * @param env Environment bindings
+ * @param ctx Optional context containing userId for authenticated operations
+ * @returns Tool execution result with optional artifact
+ */
 export async function executeTool(toolName: string, args: any, env: any, ctx?: any): Promise<ToolCallResult> {
   switch (toolName) {
     case "web_search": {
