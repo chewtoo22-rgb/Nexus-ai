@@ -8,9 +8,9 @@ import { runCodeTool } from "./code-exec";
 import { streamChat, sseSend } from "./streaming";
 import { CONNECTORS, getConnectorsByCategory, getConnector } from "./connectors";
 import { getEnabledPlugins, installPlugin, togglePlugin, uninstallPlugin, BUILTIN_PLUGINS } from "./plugins";
-import { authenticateRequest, deleteSession, loginUser, registerUser } from "./auth";
+import { authenticateRequest, deleteSession, loginUser, registerUser, type Session } from "./auth";
 import { checkRateLimit, getRateLimitHeaders } from "./rate-limit";
-import { parseJson } from "./security";
+import { assertPublicHttpUrl, parseJson } from "./security";
 import { Sandbox } from "@cloudflare/sandbox";
 import { createMission, getMission, listMissions, setMissionStatus, addMissionStep, setStepStatus, normalizeAgent, type MissionStatus } from "./missions";
 
@@ -57,6 +57,102 @@ async function handleApi(request: Request, env: Env, path: string, url: URL, ok:
   if (path.startsWith("/api/connectors/") && request.method === "GET") { const c = getConnector(path.split("/")[3]); if (!c) return ok({ error: "Not found" }, 404); return ok(c); }
   if (path.startsWith("/api/connectors/") && request.method === "DELETE") { await env.DB.prepare("DELETE FROM mcp_connections WHERE id = ?").bind(path.split("/")[3]).run(); return ok({ ok: true }); }
   if (path === "/api/plugins" && request.method === "GET") return ok(await getEnabledPlugins(env.DB));
+  if (path === "/api/plugins" && request.method === "POST") {
+    const p = await parseJson<any>(request);
+    const id = await installPlugin(env.DB, p);
+    return ok({ id, ...p });
+  }
+  if (path.startsWith("/api/plugins/") && request.method === "PATCH") {
+    const { enabled } = await parseJson<any>(request);
+    await togglePlugin(env.DB, path.split("/")[3], enabled);
+    return ok({ ok: true });
+  }
+  if (path.startsWith("/api/plugins/") && request.method === "DELETE") {
+    await uninstallPlugin(env.DB, path.split("/")[3]);
+    return ok({ ok: true });
+  }
+
+  if (path === "/api/code/run" && request.method === "POST") {
+    const user = requireSession(session);
+    const { code, language } = await parseJson<any>(request);
+    if (!code) return ok({ error: "code required" }, 400);
+    return ok(await runCodeTool({ code, language }, env, user.userId));
+  }
+  if (path === "/api/sandbox/exec" && request.method === "POST") {
+    const user = requireSession(session);
+    const { command, args } = await parseJson<any>(request);
+    if (!command || typeof command !== "string") return ok({ error: "command required" }, 400);
+    const { getSandbox } = await import("@cloudflare/sandbox");
+    const s = getSandbox(env.SANDBOX, user.userId);
+    const r = await s.exec(command, args || []);
+    return ok({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode });
+  }
+  if (path === "/api/sandbox/write" && request.method === "POST") {
+    const user = requireSession(session);
+    const { path: fp, content } = await parseJson<any>(request);
+    if (!fp || typeof fp !== "string") return ok({ error: "path required" }, 400);
+    const { getSandbox } = await import("@cloudflare/sandbox");
+    const s = getSandbox(env.SANDBOX, user.userId);
+    await s.writeFile(fp, content);
+    return ok({ ok: true });
+  }
+  if (path === "/api/sandbox/read" && request.method === "POST") {
+    const user = requireSession(session);
+    const { path: fp } = await parseJson<any>(request);
+    if (!fp || typeof fp !== "string") return ok({ error: "path required" }, 400);
+    const { getSandbox } = await import("@cloudflare/sandbox");
+    const s = getSandbox(env.SANDBOX, user.userId);
+    return ok({ content: await s.readFile(fp) });
+  }
+
+  if (path === "/api/tools/execute" && request.method === "POST") {
+    const user = requireSession(session);
+    const { tool, args } = await parseJson<any>(request);
+    if (!tool) return ok({ error: "tool required" }, 400);
+    return ok(await executeTool(tool, args, env, { userId: user.userId }));
+  }
+  if (path === "/api/browser/screenshot" && request.method === "POST") {
+    requireSession(session);
+    const { url: t } = await parseJson<any>(request);
+    const safe = assertPublicHttpUrl(t);
+    const r = await (env.BROWSER as any).quickAction("screenshot", { url: safe.toString() });
+    return new Response(r.body, { headers: { "Content-Type": "image/png" } });
+  }
+  if (path === "/api/browser/markdown" && request.method === "POST") {
+    requireSession(session);
+    const { url: t } = await parseJson<any>(request);
+    const safe = assertPublicHttpUrl(t);
+    const r = await (env.BROWSER as any).quickAction("markdown", { url: safe.toString() });
+    return new Response(r.body, { headers: { "Content-Type": "text/markdown" } });
+  }
+
+  if (path === "/api/auth/register" && request.method === "POST") {
+    const { email, password } = await parseJson<any>(request);
+    if (!email || !password) return ok({ error: "email and password required" }, 400);
+    try {
+      const s = await registerUser(env, email, password);
+      return ok({ token: s.token, userId: s.userId, email: s.email });
+    } catch (err) {
+      return httpError(err);
+    }
+  }
+  if (path === "/api/auth/login" && request.method === "POST") {
+    const { email, password } = await parseJson<any>(request);
+    const s = await loginUser(env, email, password);
+    if (!s) return ok({ error: "Invalid credentials" }, 401);
+    return ok({ token: s.token, userId: s.userId, email: s.email });
+  }
+  if (path === "/api/auth/me" && request.method === "GET") {
+    const s = await authenticateRequest(request, env);
+    if (!s) return ok({ error: "Not authenticated" }, 401);
+    return ok({ userId: s.userId, email: s.email });
+  }
+  if (path === "/api/auth/logout" && request.method === "POST") {
+    const a = request.headers.get("Authorization");
+    if (a?.startsWith("Bearer ")) await deleteSession(env, a.slice(7).trim());
+    return ok({ ok: true });
+  }
+
   if (path === "/api/plugins" && request.method === "POST") { const p = await parseJson<any>(request); const id = await installPlugin(env.DB, p); return ok({ id, ...p }); }
   if (path.startsWith("/api/plugins/") && request.method === "PATCH") { const { enabled } = await parseJson<any>(request); await togglePlugin(env.DB, path.split("/")[3], enabled); return ok({ ok: true }); }
   if (path.startsWith("/api/plugins/") && request.method === "DELETE") { await uninstallPlugin(env.DB, path.split("/")[3]); return ok({ ok: true }); }

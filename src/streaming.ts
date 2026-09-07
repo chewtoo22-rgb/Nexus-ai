@@ -10,32 +10,37 @@ export interface StreamConfig {
   tools?: any[];
   agentType: string;
   env: any;
+  userId?: string;
   onToken?: (t: string) => void;
   onToolCall?: (t: string, a: any) => void;
   onToolResult?: (t: string, r: string) => void;
   onArtifact?: (a: any) => void;
-  onComplete?: (t: string, u: any) => void;
+  onComplete?: (t: string, u: any) => void | Promise<void>;
   onError?: (e: string) => void;
 }
 
+/**
+ * Streams AI chat completion with tool execution support, including fallback to non-streaming mode on error.
+ * @param config Stream configuration with model, messages, tools, and callbacks
+ */
 export async function streamChat(config: StreamConfig): Promise<void> {
   const workersai = createWorkersAI({ binding: config.env.AI });
   const tools = config.tools || getToolsForAgent(config.agentType);
+  let completed = false;
   try {
+    let streamError: unknown;
     const result = streamText({
       model: workersai(config.model),
       system: config.systemPrompt,
       messages: config.messages,
-      tools: tools.map((t) => ({
-        type: "function" as const,
-        function: { name: t.name, description: t.description, parameters: t.parameters },
-      })),
+      tools: Object.fromEntries(tools.map((t) => [t.name, { description: t.description, parameters: t.parameters }])),
       maxTokens: 4096,
       temperature: 0.7,
-      onError: ({ error }) => config.onError?.(String(error)),
+      onError: ({ error }) => {
+        streamError = error;
+      },
     });
     let fullText = "";
-    let completed = false;
     for await (const part of result.fullStream) {
       switch (part.type) {
         case "text-delta":
@@ -46,26 +51,32 @@ export async function streamChat(config: StreamConfig): Promise<void> {
           const toolName = (part as any).toolName;
           const input = (part as any).input ?? (part as any).args;
           config.onToolCall?.(toolName, input);
-          const tr = await executeTool(toolName, input, config.env);
+          const tr = await executeTool(toolName, input, config.env, { userId: config.userId });
           if (tr.artifact) config.onArtifact?.(tr.artifact);
           config.onToolResult?.(toolName, tr.result.slice(0, 500));
           break;
         }
         case "error":
-          config.onError?.(String((part as any).error));
-          break;
+          throw (part as any).error;
         case "finish":
           completed = true;
-          config.onComplete?.(fullText, {
+          await config.onComplete?.(fullText, {
             input_tokens: (part as any).usage?.promptTokens || (part as any).usage?.inputTokens || 0,
             output_tokens: (part as any).usage?.completionTokens || (part as any).usage?.outputTokens || 0,
           });
           break;
       }
     }
-    if (!completed) config.onComplete?.(fullText, { input_tokens: 0, output_tokens: 0 });
+    if (streamError) throw streamError;
+    if (!completed) {
+      completed = true;
+      await config.onComplete?.(fullText, { input_tokens: 0, output_tokens: 0 });
+    }
   } catch (err) {
-    config.onError?.(`Streaming failed: ${String(err)}`);
+    if (completed) {
+      config.onError?.(`Streaming failed: ${String(err)}`);
+      return;
+    }
     try {
       const result = await config.env.AI.run(config.model, {
         messages: config.messages,
@@ -75,7 +86,7 @@ export async function streamChat(config: StreamConfig): Promise<void> {
       });
       const responseText = (result as any).response || "";
       config.onToken?.(responseText);
-      config.onComplete?.(responseText, {
+      await config.onComplete?.(responseText, {
         input_tokens: (result as any).usage?.prompt_tokens || 0,
         output_tokens: (result as any).usage?.completion_tokens || 0,
       });
