@@ -12,9 +12,9 @@
   "ai": { "binding": "AI" },
   "browser": { "binding": "BROWSER", "remote": true },
   "vectorize": [{ "binding": "VECTORIZE", "index_name": "nemotron-nexus-index" }],
-  "d1_databases": [{ "binding": "DB", "database_name": "nemotron-nexus-db", "database_id": "REPLACE_WITH_D1_ID" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "nemotron-nexus-db", "database_id": "5bc163d0-0817-4f16-80d3-eab5b01170a9" }],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "nemotron-nexus-bucket" }],
-  "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_WITH_KV_ID" }, { "binding": "SESSIONS", "id": "REPLACE_WITH_KV_SESSIONS_ID" }],
+  "kv_namespaces": [{ "binding": "CACHE", "id": "a29a9a6823c24047b0aba6baeffaa4d0" }, { "binding": "SESSIONS", "id": "0139702987a340acb72738a51b9d6289" }],
   "ai_search_namespaces": [{ "binding": "AI_SEARCH", "namespace": "default", "remote": true }],
   "durable_objects": {
     "bindings": [
@@ -37,8 +37,6 @@
   ],
   "observability": {
     "enabled": true,
-    "traces": {
-      "enabled": true
-    }
+    "traces": { "enabled": true }
   }
 }
