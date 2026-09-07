@@ -13,14 +13,14 @@
   "dependencies": {
     "agents": "^0.22.0",
     "@cloudflare/voice": "latest",
-    "ai": "^4.3.19",
-    "workers-ai-provider": "^2.0.0",
+    "ai": "^7.0.93",
+    "workers-ai-provider": "^4.0.0",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@cloudflare/sandbox": "^0.12.0",
     "parse5": "^7.2.1",
-    "zod": "^3.23.0"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@cloudflare/puppeteer": "^1.0.0",
