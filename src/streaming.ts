@@ -19,10 +19,7 @@ export interface StreamConfig {
   onError?: (e: string) => void;
 }
 
-/**
- * Streams AI chat completion with tool execution support, including fallback to non-streaming mode on error.
- * @param config Stream configuration with model, messages, tools, and callbacks
- */
+/** Streams AI chat completion with bounded tool execution and a non-streaming fallback. */
 export async function streamChat(config: StreamConfig): Promise<void> {
   const workersai = createWorkersAI({ binding: config.env.AI });
   const tools = config.tools || getToolsForAgent(config.agentType);
@@ -34,7 +31,7 @@ export async function streamChat(config: StreamConfig): Promise<void> {
       system: config.systemPrompt,
       messages: config.messages,
       tools: Object.fromEntries(tools.map((t) => [t.name, { description: t.description, parameters: t.parameters }])),
-      maxTokens: 4096,
+      maxOutputTokens: 4096,
       temperature: 0.7,
       onError: ({ error }) => {
         streamError = error;
@@ -43,13 +40,16 @@ export async function streamChat(config: StreamConfig): Promise<void> {
     let fullText = "";
     for await (const part of result.fullStream) {
       switch (part.type) {
-        case "text-delta":
-          fullText += (part as any).textDelta ?? (part as any).text ?? "";
-          config.onToken?.((part as any).textDelta ?? (part as any).text ?? "");
+        case "text-delta": {
+          const text = (part as any).textDelta ?? (part as any).text ?? "";
+          fullText += text;
+          config.onToken?.(text);
           break;
+        }
         case "tool-call": {
-          const toolName = (part as any).toolName;
-          const input = (part as any).input ?? (part as any).args;
+          const toolName = String((part as any).toolName || "");
+          const input = (part as any).input ?? (part as any).args ?? {};
+          if (!toolName) break;
           config.onToolCall?.(toolName, input);
           const tr = await executeTool(toolName, input, config.env, { userId: config.userId });
           if (tr.artifact) config.onArtifact?.(tr.artifact);
