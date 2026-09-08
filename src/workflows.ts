@@ -1,4 +1,5 @@
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from "cloudflare:workers";
+import type { Env } from "./index";
 import { MODELS } from "./models";
 
 interface RAGParams {
