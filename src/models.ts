@@ -30,3 +30,13 @@ export const AGENT_MODELS = {
 } as const;
 
 export const EMBED_DIMENSIONS = 1024;
+
+export function modelKeyForAgent(agentType: string): keyof typeof AGENT_MODELS {
+  if (agentType === "sirius") return "analyst";
+  if (agentType === "ana") return "builder";
+  if (agentType === "nova") return "researcher";
+  if (agentType === "builder" || agentType === "researcher" || agentType === "creative" || agentType === "analyst" || agentType === "nexus") {
+    return agentType;
+  }
+  return "nexus";
+}

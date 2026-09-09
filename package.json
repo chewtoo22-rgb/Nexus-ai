@@ -1,18 +1,20 @@
 {
   "name": "nexus-ai",
-  "version": "3.0.1",
+  "version": "3.0.4",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev --remote",
     "deploy": "wrangler deploy",
     "setup": "bash setup.sh",
     "db:init": "wrangler d1 migrations apply nemotron-nexus-db --remote",
     "tail": "wrangler tail",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
     "agents": "^0.22.0",
-    "@cloudflare/voice": "latest",
+    "@cloudflare/voice": "0.4.0",
     "ai": "^7.0.93",
     "workers-ai-provider": "^4.0.0",
     "@modelcontextprotocol/client": "2.0.0",
@@ -25,7 +27,8 @@
   "devDependencies": {
     "@cloudflare/puppeteer": "^1.0.0",
     "@cloudflare/workers-types": "^4.20250525.0",
-    "typescript": "^7.0.2",
+    "@types/node": "^22.16.5",
+    "typescript": "^5.9.3",
     "wrangler": "^4.0.0"
   }
 }

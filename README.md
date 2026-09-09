@@ -2,25 +2,28 @@
 
 Cloudflare Workers agent workspace: five specialist agents, streaming chat, optional MCP, and Workers AI models.
 
-This is a **worker + static UI**, not a complete “AI operating system.” Several advertised surfaces (OAuth connectors, plugin runtime, browser click automation) are catalogs or stubs. Chat, rate limits, auth, sandbox (auth-gated), RAG ingest, and MCP search/translate tools are the real surface.
+This is a **worker + static UI**, not a complete “AI operating system.” Several advertised surfaces (OAuth connectors, plugin runtime, browser click automation, mission *execution*) are catalogs or CRUD stubs. Chat, rate limits, auth, sandbox (auth-gated), RAG ingest, and MCP search/translate tools are the real surface.
 
 ## What actually works
 
 | Surface | Status |
 |---|---|
-| Streaming chat UI (`/api/chat`) | Live (SSE `type` field + `event:` name) |
+| Streaming chat UI (`/api/chat`) | Live (SSE `type` field + `event:` name). Anonymous chat is rate-limited and limited to cheap tools. Signed-in turns persist. |
 | Five agent prompts / model routing | Live |
-| Auth (register/login, PBKDF2) | Live — required for sandbox, documents, plugins, stats |
-| Rate limiting | Live on API + upgrade routes |
-| MCP (`/mcp`) | Live — search/navigate/translate/knowledge. **No unauthenticated `run_code`.** |
-| Sandbox / `run_code` | Live **only with a Bearer token** |
-| Connector install | Records a pending connection; **does not complete OAuth** |
+| Auth (register/login, PBKDF2) | Live — required for sandbox, documents, plugins, stats, missions, projects, conversations |
+| Rate limiting | Live on API + tighter cap on anonymous chat |
+| MCP (`/mcp`) | Live — search/translate/knowledge. **No unauthenticated `run_code` or browser tools.** |
+| Sandbox / `run_code` | Live **only with a Bearer token**, isolated per user |
+| Connector install | Records a pending connection for that user; **does not complete OAuth** |
+| Plugin install | Per-user catalog rows; **does not change the tool runtime** |
+| Missions | Auth-gated CRUD and status. **Does not run agents.** |
 | `browser_action` | Explicitly unimplemented |
-| `delegate_to_agent` | One-shot specialist model call |
+| `delegate_to_agent` | One-shot specialist model call (auth only) |
+| Agent WebSocket / voice | Live **only with a Bearer token**; Durable Objects are keyed per user |
 
-## Do not merge Dependabot `ai@7`
+## AI SDK
 
-The worker is written against the Vercel AI SDK **v4** (`streamText` + `textDelta` / `promptTokens`). Jumping to v7 is a breaking rewrite, not a patch.
+The worker is written against the Vercel AI SDK **v7** (`streamText` + `tool()` + `jsonSchema` + `stopWhen: stepCountIs(n)`). Tools are executed and fed back to the model. Major upgrades still need a dedicated pass — Dependabot majors for `ai` stay ignored.
 
 ## Deploy
 
@@ -30,7 +33,7 @@ The worker is written against the Vercel AI SDK **v4** (`streamText` + `textDelt
    - KV: `CACHE`, `SESSIONS`
    - Vectorize: `nemotron-nexus-index` (1024, cosine)
    - Queue: `nemotron-nexus-docs`
-2. Put real IDs in `wrangler.jsonc` (replace every `REPLACE_WITH_...`). Deploy **will fail** while placeholders remain.
+2. Put real IDs in `wrangler.jsonc`. Deploy **will fail** while placeholders remain.
 3. GitHub Actions secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
 4. `npm run db:init` then push `main`.
 
@@ -46,13 +49,18 @@ Wrangler / workerd does **not** work on Termux.
 
 ## Security notes
 
-- Sandbox exec, code run, document ingest, plugin mutation, and listing all conversations require `Authorization: Bearer <token>`.
-- Browser/fetch tools reject localhost, link-local, and RFC1918 targets.
+- Sandbox exec, code run, document ingest, plugin mutation, missions, conversations, artifacts, and listing stats require `Authorization: Bearer <token>`.
+- Tenant rows are scoped by `user_id`. Unowned (`NULL`) legacy rows are not returned or claimed.
+- Anonymous chat cannot call image gen, browser, TTS/STT, ingest, delegate, or `run_code`.
+- Object reads (`/api/images/...`) only succeed for that user's key prefix.
+- Agent WebSockets authenticate the session; they do **not** trust a client-supplied user header.
+- Browser/fetch tools reject localhost, link-local, and RFC1918 targets. Redirects are not followed.
 - Passwords are PBKDF2-SHA-256 (100k). Legacy `salt:sha256` hashes still verify.
-- Public MCP no longer exposes code execution.
+- Public MCP no longer exposes code execution, screenshots, or image analysis.
+- Plugin and document mutations are per-user. Built-in plugin catalog entries cannot be deleted.
 
 ## Endpoints
 
-- WebSocket: `/api/agent/:type`, `/voice`
+- WebSocket (auth): `/api/agent/:type`, `/voice`
 - MCP: `/mcp`
-- REST under `/api/` (`/health`, `/chat`, `/models`, `/auth/*`, gated `/sandbox/*`, `/code/run`, `/documents`, …)
+- REST under `/api/` (`/health`, `/chat`, `/models`, `/auth/*`, gated `/sandbox/*`, `/code/run`, `/documents`, `/missions`, …)

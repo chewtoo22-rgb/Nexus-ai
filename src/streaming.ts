@@ -1,70 +1,107 @@
-import { streamText } from "ai";
+import { jsonSchema, stepCountIs, streamText, tool } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
-import { getToolsForAgent } from "./tools";
-import { executeTool } from "./tool-executor";
+import { getToolsForAgent, type ToolDef } from "./tools";
+import { executeTool, type ToolCallResult } from "./tool-executor";
 
 export interface StreamConfig {
   model: string;
   systemPrompt: string;
-  messages: any[];
-  tools?: any[];
+  messages: Array<{ role: string; content: unknown }>;
+  tools?: ToolDef[];
   agentType: string;
   env: any;
   userId?: string;
   onToken?: (t: string) => void;
-  onToolCall?: (t: string, a: any) => void;
+  onToolCall?: (t: string, a: unknown) => void;
   onToolResult?: (t: string, r: string) => void;
-  onArtifact?: (a: any) => void;
-  onComplete?: (t: string, u: any) => void | Promise<void>;
+  onArtifact?: (a: ToolCallResult["artifact"]) => void;
+  onComplete?: (t: string, u: { input_tokens: number; output_tokens: number }) => void | Promise<void>;
   onError?: (e: string) => void;
+}
+
+function toSdkTools(defs: ToolDef[], env: any, userId?: string) {
+  return Object.fromEntries(
+    defs.map((def) => [
+      def.name,
+      tool({
+        description: def.description,
+        inputSchema: jsonSchema<Record<string, unknown>>(def.parameters),
+        execute: async (input) => {
+          const tr = await executeTool(def.name, input, env, { userId });
+          return tr;
+        },
+      }),
+    ]),
+  );
+}
+
+function asText(part: { textDelta?: string; text?: string; delta?: string }): string {
+  return part.textDelta ?? part.text ?? part.delta ?? "";
+}
+
+function toolOutput(part: Record<string, unknown>): ToolCallResult | undefined {
+  const raw = (part.output ?? part.result ?? part.delta) as ToolCallResult | undefined;
+  return raw && typeof raw === "object" ? raw : undefined;
 }
 
 /** Streams AI chat completion with bounded tool execution and a non-streaming fallback. */
 export async function streamChat(config: StreamConfig): Promise<void> {
   const workersai = createWorkersAI({ binding: config.env.AI });
-  const tools = config.tools || getToolsForAgent(config.agentType);
+  const tools = config.tools || getToolsForAgent(config.agentType, { authenticated: Boolean(config.userId) });
   let completed = false;
   try {
     let streamError: unknown;
     const result = streamText({
       model: workersai(config.model),
       system: config.systemPrompt,
-      messages: config.messages,
-      tools: Object.fromEntries(tools.map((t) => [t.name, { description: t.description, parameters: t.parameters }])),
+      messages: config.messages as any,
+      tools: toSdkTools(tools, config.env, config.userId),
+      stopWhen: stepCountIs(5),
       maxOutputTokens: 4096,
-      temperature: 0.7,
+      temperature: 0.4,
       onError: ({ error }) => {
         streamError = error;
       },
     });
     let fullText = "";
     for await (const part of result.fullStream) {
-      switch (part.type) {
+      const typed = part as { type: string } & Record<string, unknown>;
+      switch (typed.type) {
         case "text-delta": {
-          const text = (part as any).textDelta ?? (part as any).text ?? "";
+          const text = asText(typed as { textDelta?: string; text?: string });
           fullText += text;
-          config.onToken?.(text);
+          if (text) config.onToken?.(text);
           break;
         }
         case "tool-call": {
-          const toolName = String((part as any).toolName || "");
-          const input = (part as any).input ?? (part as any).args ?? {};
-          if (!toolName) break;
-          config.onToolCall?.(toolName, input);
-          const tr = await executeTool(toolName, input, config.env, { userId: config.userId });
-          if (tr.artifact) config.onArtifact?.(tr.artifact);
-          config.onToolResult?.(toolName, tr.result.slice(0, 500));
+          const toolName = String(typed.toolName || "");
+          const input = typed.input ?? typed.args ?? {};
+          if (toolName) config.onToolCall?.(toolName, input);
+          break;
+        }
+        case "tool-result": {
+          const toolName = String(typed.toolName || "");
+          const output = toolOutput(typed);
+          if (output?.artifact) config.onArtifact?.(output.artifact);
+          config.onToolResult?.(toolName, String(output?.result ?? "").slice(0, 500));
           break;
         }
         case "error":
-          throw (part as any).error;
-        case "finish":
+          throw typed.error;
+        case "finish": {
           completed = true;
           await config.onComplete?.(fullText, {
-            input_tokens: (part as any).usage?.promptTokens || (part as any).usage?.inputTokens || 0,
-            output_tokens: (part as any).usage?.completionTokens || (part as any).usage?.outputTokens || 0,
+            input_tokens:
+              Number((typed.usage as { promptTokens?: number; inputTokens?: number } | undefined)?.promptTokens) ||
+              Number((typed.usage as { inputTokens?: number } | undefined)?.inputTokens) ||
+              0,
+            output_tokens:
+              Number((typed.usage as { completionTokens?: number; outputTokens?: number } | undefined)?.completionTokens) ||
+              Number((typed.usage as { outputTokens?: number } | undefined)?.outputTokens) ||
+              0,
           });
           break;
+        }
       }
     }
     if (streamError) throw streamError;
@@ -79,16 +116,19 @@ export async function streamChat(config: StreamConfig): Promise<void> {
     }
     try {
       const result = await config.env.AI.run(config.model, {
-        messages: config.messages,
-        tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } })),
+        messages: [{ role: "system", content: config.systemPrompt }, ...config.messages],
+        tools: tools.map((t) => ({
+          type: "function",
+          function: { name: t.name, description: t.description, parameters: t.parameters },
+        })),
         max_tokens: 4096,
-        temperature: 0.7,
+        temperature: 0.4,
       });
-      const responseText = (result as any).response || "";
+      const responseText = (result as { response?: string }).response || "";
       config.onToken?.(responseText);
       await config.onComplete?.(responseText, {
-        input_tokens: (result as any).usage?.prompt_tokens || 0,
-        output_tokens: (result as any).usage?.completion_tokens || 0,
+        input_tokens: (result as { usage?: { prompt_tokens?: number } }).usage?.prompt_tokens || 0,
+        output_tokens: (result as { usage?: { completion_tokens?: number } }).usage?.completion_tokens || 0,
       });
     } catch (e) {
       config.onError?.(`Fallback failed: ${String(e)}`);
@@ -96,7 +136,11 @@ export async function streamChat(config: StreamConfig): Promise<void> {
   }
 }
 
-export function sseSend(controller: ReadableStreamDefaultController, event: string, data: Record<string, unknown>): void {
+export function sseSend(
+  controller: ReadableStreamDefaultController,
+  event: string,
+  data: Record<string, unknown>,
+): void {
   const payload = { type: event, ...data };
   controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
 }

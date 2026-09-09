@@ -1,4 +1,4 @@
--- D1 schema for nexus-ai
+-- D1 schema for nexus-ai (source of truth for new databases; apply migrations/ on existing ones)
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
 CREATE INDEX IF NOT EXISTS idx_documents_project ON documents(project_id);
+CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY,
@@ -72,8 +73,10 @@ CREATE TABLE IF NOT EXISTS mcp_connections (
   url TEXT NOT NULL,
   status TEXT DEFAULT 'disconnected',
   tools TEXT,
+  user_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_mcp_connections_user ON mcp_connections(user_id);
 
 CREATE TABLE IF NOT EXISTS plugins (
   id TEXT PRIMARY KEY,
@@ -82,8 +85,10 @@ CREATE TABLE IF NOT EXISTS plugins (
   icon TEXT,
   tools TEXT,
   enabled INTEGER DEFAULT 1,
-  installed_at TEXT DEFAULT (datetime('now'))
+  installed_at TEXT DEFAULT (datetime('now')),
+  user_id TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_plugins_user ON plugins(user_id);
 
 CREATE TABLE IF NOT EXISTS usage (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,10 +101,12 @@ CREATE TABLE IF NOT EXISTS usage (
   cached INTEGER DEFAULT 0,
   tool_calls INTEGER DEFAULT 0,
   browser_actions INTEGER DEFAULT 0,
+  user_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_usage_agent ON usage(agent_type);
 CREATE INDEX IF NOT EXISTS idx_usage_created ON usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_user ON usage(user_id);
 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -109,6 +116,7 @@ CREATE TABLE IF NOT EXISTS projects (
   user_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
 
 CREATE TABLE IF NOT EXISTS missions (
   id TEXT PRIMARY KEY,
@@ -116,6 +124,7 @@ CREATE TABLE IF NOT EXISTS missions (
   status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','planning','running','completed','failed','cancelled')),
   orchestrator TEXT NOT NULL DEFAULT 'sirius',
   project_id TEXT,
+  user_id TEXT,
   result TEXT,
   error TEXT,
   created_at TEXT DEFAULT (datetime('now')),
@@ -123,6 +132,7 @@ CREATE TABLE IF NOT EXISTS missions (
 );
 CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status);
 CREATE INDEX IF NOT EXISTS idx_missions_updated ON missions(updated_at);
+CREATE INDEX IF NOT EXISTS idx_missions_user ON missions(user_id);
 
 CREATE TABLE IF NOT EXISTS mission_steps (
   id TEXT PRIMARY KEY,

@@ -1,4 +1,4 @@
-import { bytesFromHex, timingSafeEqual, toHex } from "./security";
+import { bytesFromHex, timingSafeEqual, toHex } from "./security.ts";
 
 export interface Session {
   userId: string;

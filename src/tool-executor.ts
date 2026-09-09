@@ -15,14 +15,11 @@ const DELEGATE_PROMPTS: Record<string, string> = {
   analyst: "You are Sirius, an analyst. Quantify tradeoffs and finish with a recommendation.",
 };
 
-/**
- * Executes a named tool with provided arguments, supporting web search, browser actions, code execution, and AI capabilities.
- * @param toolName Tool identifier
- * @param args Tool-specific arguments
- * @param env Environment bindings
- * @param ctx Optional context containing userId for authenticated operations
- * @returns Tool execution result with optional artifact
- */
+function objectKey(prefix: string, userId?: string): string {
+  const owner = userId || "anon";
+  return `${prefix}/${owner}/${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export async function executeTool(toolName: string, args: any, env: any, ctx?: any): Promise<ToolCallResult> {
   switch (toolName) {
     case "web_search": {
@@ -32,7 +29,7 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
     case "browser_navigate":
       return await browserFetchMarkdown(env, args.url);
     case "browser_screenshot":
-      return await browserScreenshot(env, args.url);
+      return await browserScreenshot(env, args.url, ctx?.userId);
     case "browser_extract":
       return await browserExtract(env, args.url, args.selector);
     case "browser_action":
@@ -52,7 +49,7 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
       };
       const model = mm[args.model] || MODELS.imageGen.balanced;
       const r = await env.AI.run(model, { prompt: args.prompt });
-      const key = `images/${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
+      const key = `${objectKey("images", ctx?.userId)}.png`;
       const img = (r as any).image || (r as any);
       if (img instanceof Uint8Array || img instanceof ArrayBuffer) {
         await env.BUCKET.put(key, img);
@@ -61,9 +58,14 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
       return { result: "Image generated but could not be stored." };
     }
     case "search_knowledge": {
+      if (!ctx?.userId) return { result: "No relevant documents found." };
       const emb = await env.AI.run(MODELS.embeddings.primary, { text: [args.query] });
       const v = (emb as any).data?.[0] ?? [];
-      const r = await env.VECTORIZE.query(v, { topK: 5, returnMetadata: "all" });
+      const r = await env.VECTORIZE.query(v, {
+        topK: 5,
+        returnMetadata: "all",
+        filter: { userId: { $eq: ctx.userId } },
+      });
       if (!r.matches?.length) return { result: "No relevant documents found." };
       return {
         result: r.matches.filter((m: any) => m.score > 0.5).map((m: any, i: number) => `[${i + 1}] ${m.metadata?.text ?? ""}`).join("\n\n") || "No results.",
@@ -77,13 +79,20 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
       }
     }
     case "ingest_document": {
+      if (!ctx?.userId) return { result: "Authentication required to ingest documents." };
       const id = crypto.randomUUID();
-      const key = `documents/${id}/inline.txt`;
+      const key = `documents/${ctx.userId}/${id}/inline.txt`;
       await env.BUCKET.put(key, args.text);
       await env.DB.prepare("INSERT INTO documents (id, source, source_key, title, status, user_id) VALUES (?, 'upload', ?, ?, 'pending', ?)")
-        .bind(id, key, args.title || "Inline text", ctx?.userId || null)
+        .bind(id, key, args.title || "Inline text", ctx.userId)
         .run();
-      await env.DOC_QUEUE.send({ documentId: id, source: "r2", sourceKey: key, title: args.title || "Inline text" });
+      await env.DOC_QUEUE.send({
+        documentId: id,
+        source: "r2",
+        sourceKey: key,
+        title: args.title || "Inline text",
+        userId: ctx.userId,
+      });
       return { result: `Document queued. ID: ${id}` };
     }
     case "create_artifact":
@@ -96,7 +105,7 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
       const m = args.lang === "es" ? MODELS.tts.es : args.lang === "multi" ? MODELS.tts.multi : MODELS.tts.en;
       const r = await env.AI.run(m, { text: args.text, prompt: "Speak naturally" });
       if ((r as any).audio) {
-        const k = `audio/tts/${Date.now()}.mp3`;
+        const k = `${objectKey("audio/tts", ctx?.userId)}.mp3`;
         await env.BUCKET.put(k, (r as any).audio);
         return { result: `Audio saved: ${k}` };
       }
@@ -105,6 +114,9 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
     case "speech_to_text": {
       const safe = assertPublicHttpUrl(args.audio_url);
       const ar = await fetch(safe.toString(), { redirect: "manual" });
+      if (!ar.ok) return { result: "Failed to fetch audio." };
+      const len = Number(ar.headers.get("content-length") || "0");
+      if (len > 15_000_000) return { result: "Audio too large." };
       const ab = await ar.blob();
       const r = await env.AI.run(MODELS.stt.batch, { audio: [...new Uint8Array(await ab.arrayBuffer())] });
       return { result: (r as any).text || JSON.stringify(r) };
@@ -138,7 +150,9 @@ export async function executeTool(toolName: string, args: any, env: any, ctx?: a
     case "run_code": {
       const { runCodeTool } = await import("./code-exec");
       if (!ctx?.userId) return { result: "Authentication required for code execution." };
-      return await runCodeTool(args, env, ctx.userId);
+      const code = String(args.code || "");
+      if (code.length > 80_000) return { result: "Code too large." };
+      return await runCodeTool({ code, language: args.language }, env, ctx.userId);
     }
     default:
       return { result: `Unknown tool: ${toolName}` };
@@ -176,11 +190,11 @@ async function browserFetchMarkdown(env: any, url: string): Promise<ToolCallResu
   }
 }
 
-async function browserScreenshot(env: any, url: string): Promise<ToolCallResult> {
+async function browserScreenshot(env: any, url: string, userId?: string): Promise<ToolCallResult> {
   const safe = assertPublicHttpUrl(url);
   try {
     const r = await env.BROWSER.quickAction("screenshot", { url: safe.toString() });
-    const k = `screenshots/${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
+    const k = `${objectKey("screenshots", userId)}.png`;
     await env.BUCKET.put(k, await r.arrayBuffer());
     return { result: `Screenshot saved: ${k}`, artifact: { type: "image", title: `Screenshot of ${safe.toString()}`, r2_key: k } };
   } catch {

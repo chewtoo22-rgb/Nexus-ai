@@ -115,3 +115,30 @@ export async function parseJson<T = Record<string, unknown>>(request: Request): 
     throw clientError("Invalid JSON body");
   }
 }
+
+export function isOwnedObjectKey(key: string, userId: string): boolean {
+  if (!key || !userId || key.includes("..") || key.includes("\\") || key.includes("\0") || key.startsWith("/")) {
+    return false;
+  }
+  const prefixes = [
+    `images/${userId}/`,
+    `screenshots/${userId}/`,
+    `audio/tts/${userId}/`,
+    `documents/${userId}/`,
+  ];
+  return prefixes.some((prefix) => key.startsWith(prefix));
+}
+
+export function isUploadedFile(value: unknown): value is {
+  name: string;
+  size: number;
+  stream: () => ReadableStream;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+} {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { name?: unknown }).name === "string" &&
+    typeof (value as { stream?: unknown }).stream === "function"
+  );
+}
