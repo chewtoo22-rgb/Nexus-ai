@@ -43,13 +43,15 @@ export class RAGWorkflow extends WorkflowEntrypoint<Env, RAGParams> {
 }
 
 function chunkText(text: string, chunkSize: number, overlap: number): string[] {
+  if (chunkSize <= 0) throw new Error("chunkSize must be positive");
+  const safeOverlap = Math.max(0, Math.min(overlap, chunkSize - 1));
   const chunks: string[] = [];
   let start = 0;
   while (start < text.length) {
     const end = Math.min(start + chunkSize, text.length);
     chunks.push(text.slice(start, end));
-    start = end - overlap;
-    if (start >= text.length) break;
+    if (end >= text.length) break;
+    start = end - safeOverlap;
   }
   return chunks;
 }
