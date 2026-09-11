@@ -1,4 +1,4 @@
-import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from "cloudflare:workers";
+import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { Env } from "./index";
 import { MODELS } from "./models";
 
@@ -9,8 +9,13 @@ interface RAGParams {
   title?: string;
 }
 
+type WorkflowEventLike<T> = { payload: T };
+type WorkflowStepLike = {
+  do<T>(name: string, callback: () => Promise<T>): Promise<T>;
+};
+
 export class RAGWorkflow extends WorkflowEntrypoint<Env, RAGParams> {
-  async run(event: WorkflowEvent<RAGParams>, step: WorkflowStep): Promise<void> {
+  async run(event: WorkflowEventLike<RAGParams>, step: WorkflowStepLike): Promise<void> {
     const { documentId, source, sourceKey, title } = event.payload;
     const content = await step.do("fetch-document", async () => {
       if (source === "r2") {
