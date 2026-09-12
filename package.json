@@ -14,7 +14,7 @@
     "agents": "^0.22.0",
     "@cloudflare/voice": "latest",
     "ai": "^4.3.19",
-    "workers-ai-provider": "^2.0.0",
+    "workers-ai-provider": "^4.0.0",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@modelcontextprotocol/sdk": "1.30.0",
