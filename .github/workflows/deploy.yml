@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: nexus-ai-deploy
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -18,9 +22,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
+      - name: Install locked dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck before deploy
+        run: npm run typecheck
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
