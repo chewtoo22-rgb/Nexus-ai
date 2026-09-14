@@ -1,0 +1,44 @@
+name: Nexus Smoke Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: nexus-ai-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Wrangler dry-run bundle validation
+        run: npx wrangler deploy --dry-run --outdir .wrangler-smoke
+
+      - name: Verify bundle output
+        run: test -s .wrangler-smoke/index.js
+
+      - name: Cleanup generated output
+        if: always()
+        run: rm -rf .wrangler-smoke
