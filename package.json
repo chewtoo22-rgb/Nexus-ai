@@ -8,7 +8,8 @@
     "setup": "bash setup.sh",
     "db:init": "wrangler d1 migrations apply nemotron-nexus-db --remote",
     "tail": "wrangler tail",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:model-routing": "node scripts/check-model-routing.mjs"
   },
   "dependencies": {
     "agents": "^0.22.0",
