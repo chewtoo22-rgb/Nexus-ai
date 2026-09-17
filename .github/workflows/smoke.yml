@@ -33,6 +33,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Model routing guard
+        run: npm run check:model-routing
+
       - name: Wrangler dry-run bundle validation
         run: npx wrangler deploy --dry-run --outdir .wrangler-smoke
 
