@@ -1,6 +1,7 @@
 import { Agent, type ConnectionContext, type WSMessage } from "agents";
 import { getToolsForAgent } from "./tools";
 import { AGENT_MODELS } from "./models";
+import { resolveChatModel } from "./model-router";
 import { executeTool } from "./tool-executor";
 import { streamChat } from "./streaming";
 
@@ -99,7 +100,8 @@ async function handleAgentMessage(agent: AgentLike, conn: any, message: WSMessag
   if (!content || typeof content !== "string") { conn.send(JSON.stringify({ type: "error", error: "content required" })); return; }
   const history = (agent.state?.history || []) as any[];
   const tools = getToolsForAgent(agent.agentType);
-  const selectedModel = model || agent.models.primary;
+  const route = resolveChatModel({ agent: agent.agentType, requestedModel: model, hasImages: Array.isArray(images) && images.length > 0 });
+  const selectedModel = route.model;
   const messages: any[] = [{ role: "system", content: agent.systemPrompt }, ...history.slice(-24)];
   messages.push(images?.length
     ? { role: "user", content: [{ type: "text", text: content }, ...images.map((u: string) => ({ type: "image_url", image_url: { url: u } }))] }
@@ -122,7 +124,7 @@ async function handleAgentMessage(agent: AgentLike, conn: any, message: WSMessag
         const latency = Date.now() - start;
         agent.state = { ...(agent.state || {}), history: [...history, { role: "user", content }, { role: "assistant", content: fullText }].slice(-48) };
         await persistTurn(agent.env, conversationId, content, fullText, selectedModel, agent.agentType, usage, latency, allArtifacts);
-        conn.send(JSON.stringify({ type: "response", content: fullText, model: selectedModel, agent: agent.agentType, latency_ms: latency, artifacts: allArtifacts, usage, streamed: true }));
+        conn.send(JSON.stringify({ type: "response", content: fullText, model: selectedModel, agent: agent.agentType, route: route.reason, downgraded: route.downgraded, latency_ms: latency, artifacts: allArtifacts, usage, streamed: true }));
       },
       onError: (error) => conn.send(JSON.stringify({ type: "error", error: String(error) })),
     });
@@ -163,7 +165,7 @@ async function handleAgentMessage(agent: AgentLike, conn: any, message: WSMessag
     agent.state = { ...(agent.state || {}), history: [...history, { role: "user", content }, { role: "assistant", content: responseText }].slice(-48) };
     const usage = { input_tokens: (result as any).usage?.prompt_tokens || 0, output_tokens: (result as any).usage?.completion_tokens || 0 };
     await persistTurn(agent.env, conversationId, content, responseText, selectedModel, agent.agentType, usage, latency, allArtifacts);
-    conn.send(JSON.stringify({ type: "response", content: responseText, model: selectedModel, agent: agent.agentType, latency_ms: latency, artifacts: allArtifacts, usage }));
+    conn.send(JSON.stringify({ type: "response", content: responseText, model: selectedModel, agent: agent.agentType, route: route.reason, downgraded: route.downgraded, latency_ms: latency, artifacts: allArtifacts, usage }));
     return;
   }
   conn.send(JSON.stringify({ type: "error", error: "Maximum tool calling rounds exceeded" }));
