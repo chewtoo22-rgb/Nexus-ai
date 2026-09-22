@@ -10,7 +10,8 @@
     "tail": "wrangler tail",
     "typecheck": "tsc --noEmit",
     "check:model-routing": "node scripts/check-model-routing.mjs",
-    "check:agent-persistence": "node scripts/check-agent-persistence.mjs"
+    "check:agent-persistence": "node scripts/check-agent-persistence.mjs",
+    "check:security-routes": "node scripts/check-security-routes.mjs"
   },
   "dependencies": {
     "agents": "^0.22.0",
