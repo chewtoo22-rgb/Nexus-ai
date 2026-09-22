@@ -39,6 +39,9 @@ jobs:
       - name: Agent persistence guard
         run: npm run check:agent-persistence
 
+      - name: Security route guard
+        run: npm run check:security-routes
+
       - name: Wrangler dry-run bundle validation
         run: npx wrangler deploy --dry-run --outdir .wrangler-smoke
 
