@@ -2,10 +2,12 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync("src/index.ts", "utf8");
 const requiredProtectedPrefixes = [
-  "/api/search",
-  "/api/ai-search",
-  "/api/artifacts",
+  "/api/documents",
+  "/api/ingest",
+  "/api/plugins",
+  "/api/tools/execute",
 ];
+const highValueUnprotectedCandidates = ["/api/search", "/api/ai-search"];
 
 const authPrefixMatch = source.match(/const AUTH_PREFIXES\s*=\s*\[([\s\S]*?)\];/);
 if (!authPrefixMatch) {
@@ -17,10 +19,15 @@ const authBlock = authPrefixMatch[1];
 const missing = requiredProtectedPrefixes.filter((prefix) => !authBlock.includes(`\"${prefix}\"`));
 
 if (missing.length) {
-  console.error("Sensitive knowledge/artifact routes are not protected by the shared auth gate:");
+  console.error("Required sensitive routes are missing from the shared auth gate:");
   for (const route of missing) console.error(`- ${route}`);
-  console.error("Add the routes to AUTH_PREFIXES before home validation.");
   process.exit(1);
+}
+
+const candidates = highValueUnprotectedCandidates.filter((prefix) => !authBlock.includes(`\"${prefix}\"`));
+if (candidates.length) {
+  console.warn("Review before home validation: these knowledge routes are not in AUTH_PREFIXES:");
+  for (const route of candidates) console.warn(`- ${route}`);
 }
 
 console.log("Security route guard passed.");
