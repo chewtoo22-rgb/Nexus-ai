@@ -6,8 +6,9 @@ const requiredProtectedPrefixes = [
   "/api/ingest",
   "/api/plugins",
   "/api/tools/execute",
+  "/api/search",
+  "/api/ai-search",
 ];
-const highValueUnprotectedCandidates = ["/api/search", "/api/ai-search"];
 
 const authPrefixMatch = source.match(/const AUTH_PREFIXES\s*=\s*\[([\s\S]*?)\];/);
 if (!authPrefixMatch) {
@@ -19,15 +20,10 @@ const authBlock = authPrefixMatch[1];
 const missing = requiredProtectedPrefixes.filter((prefix) => !authBlock.includes(`\"${prefix}\"`));
 
 if (missing.length) {
-  console.error("Required sensitive routes are missing from the shared auth gate:");
+  console.error("Sensitive routes are missing from the shared auth gate:");
   for (const route of missing) console.error(`- ${route}`);
+  console.error("Refusing to pass smoke validation until these data-plane routes are protected.");
   process.exit(1);
-}
-
-const candidates = highValueUnprotectedCandidates.filter((prefix) => !authBlock.includes(`\"${prefix}\"`));
-if (candidates.length) {
-  console.warn("Review before home validation: these knowledge routes are not in AUTH_PREFIXES:");
-  for (const route of candidates) console.warn(`- ${route}`);
 }
 
 console.log("Security route guard passed.");
