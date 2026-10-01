@@ -22,6 +22,17 @@ This is a **worker + static UI**, not a complete “AI operating system.” Seve
 
 The worker is written against the Vercel AI SDK **v4** (`streamText` + `textDelta` / `promptTokens`). Jumping to v7 is a breaking rewrite, not a patch.
 
+## Security notes
+
+- Sandbox, documents, plugins, search, projects, artifacts, images, missions, MCP, voice, and agent websockets require `Authorization: Bearer <token>`.
+- Conversation, document, and project rows are scoped to the authenticated `user_id`. Unowned (`NULL`) legacy rows are no longer world-readable.
+- Client-supplied model IDs are allowlisted against `MODELS.chat`.
+- Chat messages are capped at 8k characters.
+- R2 object keys are sanitized before fetch.
+- Browser/fetch tools reject localhost, link-local, and RFC1918 targets.
+
+Known remaining gaps: missions and MCP connections are still shared among all authenticated users (no `user_id` column), and streaming tool calls still lack `execute` functions in the AI SDK path.
+
 ## Deploy
 
 1. Create Cloudflare resources (or run `npm run setup` on a machine with Wrangler):
