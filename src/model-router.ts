@@ -3,8 +3,8 @@ import { AGENT_MODELS, MODELS } from "./models";
 export type AgentModelKey = keyof typeof AGENT_MODELS;
 export type ModelRouteReason = "requested" | "agent-primary" | "vision" | "fast" | "fallback";
 
-const CHAT_MODELS = new Set(Object.values(MODELS.chat));
-const VISION_MODELS = new Set([
+const CHAT_MODELS: ReadonlySet<string> = new Set(Object.values(MODELS.chat));
+const VISION_MODELS: ReadonlySet<string> = new Set([
   MODELS.chat.multimodal,
   MODELS.chat.vision,
   MODELS.chat.mistralVision,
