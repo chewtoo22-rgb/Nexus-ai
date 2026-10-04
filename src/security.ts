@@ -115,3 +115,12 @@ export async function parseJson<T = Record<string, unknown>>(request: Request): 
     throw clientError("Invalid JSON body");
   }
 }
+
+export function assertSafeObjectKey(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.trim()) throw clientError("Object key required");
+  const key = raw.trim().replace(/^\/+/, "");
+  if (!key || key.includes("..") || key.includes("\\") || key.startsWith("/") || key.includes("\0")) {
+    throw clientError("Invalid object key");
+  }
+  return key;
+}

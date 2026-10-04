@@ -30,3 +30,9 @@ export const AGENT_MODELS = {
 } as const;
 
 export const EMBED_DIMENSIONS = 1024;
+
+const CHAT_MODEL_IDS = new Set<string>(Object.values(MODELS.chat));
+
+export function isAllowedChatModel(id: string | undefined | null): boolean {
+  return typeof id === "string" && CHAT_MODEL_IDS.has(id);
+}
