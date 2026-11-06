@@ -60,8 +60,19 @@ jobs:
           jq 'del(.runs[] | select(.tool.driver.name == "Jacksonlinter (reported by Codacy)"))' results.sarif > results.filtered.sarif
           mv results.filtered.sarif results.sarif
 
+      - name: Check for remaining SARIF runs
+        id: sarif
+        run: |
+          jq -e '.runs | type == "array"' results.sarif >/dev/null
+          if jq -e '.runs | length > 0' results.sarif >/dev/null; then
+            echo "has-runs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-runs=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Upload the SARIF file generated in the previous step
       - name: Upload SARIF results file
+        if: steps.sarif.outputs.has-runs == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif
