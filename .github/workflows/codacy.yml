@@ -54,10 +54,10 @@ jobs:
           # This will handover control about PR rejection to the GitHub side
           max-allowed-issues: 2147483647
 
-      # Jacksonlinter reports no findings and adds only an empty tool entry.
-      - name: Remove Jacksonlinter from code scanning results
+      # TSQLLint targets SQL Server, but this repository's SQL is SQLite for D1.
+      - name: Exclude non-applicable Codacy results
         run: |
-          jq 'del(.runs[] | select(.tool.driver.name == "Jacksonlinter (reported by Codacy)"))' results.sarif > results.filtered.sarif
+          jq '(.runs[] | select(.tool.driver.name == "Tsqllint (reported by Codacy)").results) = [] | del(.runs[] | select(.tool.driver.name == "Jacksonlinter (reported by Codacy)"))' results.sarif > results.filtered.sarif
           mv results.filtered.sarif results.sarif
 
       - name: Check for remaining SARIF runs
