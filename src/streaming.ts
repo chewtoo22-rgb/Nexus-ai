@@ -1,4 +1,4 @@
-import { streamText } from "ai";
+import { jsonSchema, streamText } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { getToolsForAgent } from "./tools";
 import { executeTool } from "./tool-executor";
@@ -30,7 +30,7 @@ export async function streamChat(config: StreamConfig): Promise<void> {
       model: workersai(config.model),
       system: config.systemPrompt,
       messages: config.messages,
-      tools: Object.fromEntries(tools.map((t) => [t.name, { description: t.description, parameters: t.parameters }])),
+      tools: Object.fromEntries(tools.map((t) => [t.name, { description: t.description, inputSchema: jsonSchema(t.parameters) }])),
       maxOutputTokens: 4096,
       temperature: 0.7,
       onError: ({ error }) => {
