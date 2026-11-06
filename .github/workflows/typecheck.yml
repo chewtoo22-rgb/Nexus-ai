@@ -11,6 +11,9 @@ concurrency:
   group: nexus-ai-typecheck-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   typecheck:
     runs-on: ubuntu-latest
