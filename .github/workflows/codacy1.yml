@@ -55,7 +55,17 @@ jobs:
           max-allowed-issues: 2147483647
 
       # Upload the SARIF file generated in the previous step
+      - name: Check SARIF has runs
+        id: sarif
+        run: |
+          if [ -f results.sarif ] && [ "$(jq '.runs | length' results.sarif)" -gt 0 ]; then
+            echo "has_runs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No SARIF runs produced; skipping upload"
+          fi
+
       - name: Upload SARIF results file
+        if: steps.sarif.outputs.has_runs == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif
