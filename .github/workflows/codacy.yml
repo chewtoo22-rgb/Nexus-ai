@@ -54,6 +54,12 @@ jobs:
           # This will handover control about PR rejection to the GitHub side
           max-allowed-issues: 2147483647
 
+      # Jacksonlinter reports no findings and adds only an empty tool entry.
+      - name: Remove Jacksonlinter from code scanning results
+        run: |
+          jq 'del(.runs[] | select(.tool.driver.name == "Jacksonlinter (reported by Codacy)"))' results.sarif > results.filtered.sarif
+          mv results.filtered.sarif results.sarif
+
       # Upload the SARIF file generated in the previous step
       - name: Upload SARIF results file
         uses: github/codeql-action/upload-sarif@v3
