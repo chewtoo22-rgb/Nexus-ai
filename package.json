@@ -16,7 +16,7 @@
   "dependencies": {
     "agents": "^0.33.0",
     "@cloudflare/voice": "latest",
-    "ai": "^7.0.0",
+    "ai": "^7.0.169",
     "workers-ai-provider": "^4.0.0",
     "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/server": "2.4.0",
